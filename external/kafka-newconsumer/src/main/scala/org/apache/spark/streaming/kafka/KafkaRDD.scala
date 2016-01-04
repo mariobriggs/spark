@@ -21,6 +21,7 @@ import org.apache.spark.partial.{BoundedDouble, PartialResult}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.util.NextIterator
 import org.apache.spark.{Logging, Partition, SparkContext, TaskContext}
+import org.apache.spark.streaming.kafka.KafkaCluster.LeaderOffset
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
@@ -50,15 +51,8 @@ class KafkaRDD[
     messageHandler: ConsumerRecord[K, V] => R
   ) extends RDD[R](sc, Nil) with Logging with HasOffsetRanges {
   override def getPartitions: Array[Partition] = {
-    // probably overkill to get leader every batch duration (if its small)
-    // for preferredLocation of parition. Also probably too minimal to get only
-    // once for a app. Might need to be somewhere in between
-    val topics = offsetRanges.map { _.topic }.toSet
-    val tpLeaders = new KafkaCluster(kafkaParams).getPartitionsLeader(topics)
-
     offsetRanges.zipWithIndex.map { case (o, i) =>
-      new KafkaRDDPartition(i, o.topic, o.partition, o.fromOffset, o.untilOffset,
-        tpLeaders(new TopicPartition(o.topic, o.partition)))
+      new KafkaRDDPartition(i, o.topic, o.partition, o.fromOffset, o.untilOffset, o.leaderHost)
     }.toArray
   }
 
@@ -106,7 +100,12 @@ class KafkaRDD[
   override def getPreferredLocations(thePart: Partition): Seq[String] = {
     val part = thePart.asInstanceOf[KafkaRDDPartition]
     // TODO is additional hostname resolution necessary here
-    Seq(part.host)
+    if (part.host != null ) {
+      Seq(part.host)
+    }
+    else {
+      Seq()
+    }
   }
 
   private def errBeginAfterEnd(part: KafkaRDDPartition): String =
@@ -208,12 +207,12 @@ object KafkaRDD {
       sc: SparkContext,
       kafkaParams: Map[String, String],
       fromOffsets: Map[TopicPartition, Long],
-      untilOffsets: Map[TopicPartition, Long],
+      untilOffsets: Map[TopicPartition, LeaderOffset],
       messageHandler: ConsumerRecord[K, V] => R
     ): KafkaRDD[K, V, R] = {
     val offsetRanges = fromOffsets.map { case (tp, fo) =>
         val uo = untilOffsets(tp)
-        OffsetRange(tp.topic, tp.partition, fo, uo)
+        OffsetRange(tp.topic, tp.partition, fo, uo.offset, uo.host)
     }.toArray
 
     new KafkaRDD[K, V, R](sc, kafkaParams, offsetRanges, messageHandler)

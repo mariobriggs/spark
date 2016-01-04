@@ -46,8 +46,15 @@ final class OffsetRange private(
     val topic: String,
     val partition: Int,
     val fromOffset: Long,
-    val untilOffset: Long) extends Serializable {
+    val untilOffset: Long,
+    val leaderHost: String) extends Serializable {
   import OffsetRange.OffsetRangeTuple
+
+  def this(topic: String,
+      partition: Int,
+      fromOffset: Long,
+      untilOffset: Long) =
+    this(topic, partition, fromOffset, untilOffset, null)
 
   /** Kafka TopicAndPartition object, for convenience */
   def topicPartition(): TopicPartition = new TopicPartition(topic, partition)
@@ -92,6 +99,14 @@ object OffsetRange {
 
   def apply(topic: String, partition: Int, fromOffset: Long, untilOffset: Long): OffsetRange =
     new OffsetRange(topic, partition, fromOffset, untilOffset)
+
+  def apply(
+      topic: String,
+      partition: Int,
+      fromOffset: Long,
+      untilOffset: Long,
+      leaderHost: String): OffsetRange =
+    new OffsetRange(topic, partition, fromOffset, untilOffset, leaderHost)
 
   def apply(
       topicPartition: TopicPartition,

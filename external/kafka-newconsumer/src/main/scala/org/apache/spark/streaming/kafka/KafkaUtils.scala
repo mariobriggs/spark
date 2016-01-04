@@ -91,8 +91,7 @@ object KafkaUtils {
       topics: Set[String]
   ): InputDStream[(K, V)] = {
     val messageHandler = (cr: ConsumerRecord[K, V]) => (cr.key, cr.value)
-    val kc = new KafkaCluster(kafkaParams)
-    val fromOffsets = getFromOffsets(kc, kafkaParams, topics)
+    val fromOffsets = getFromOffsets(kafkaParams, topics)
     new DirectKafkaInputDStream[K, V, (K, V)](
       ssc, kafkaParams, fromOffsets, messageHandler)
   }
@@ -280,9 +279,8 @@ object KafkaUtils {
       offsetRanges: Array[OffsetRange]
     ): RDD[(K, V)] = sc.withScope {
     val messageHandler = (cr: ConsumerRecord[K, V]) => (cr.key, cr.value)
-    val kc = new KafkaCluster(kafkaParams)
-    checkOffsets(kc, offsetRanges)
-    new KafkaRDD[K, V, (K, V)](sc, kafkaParams, offsetRanges, messageHandler)
+    new KafkaRDD[K, V, (K, V)](sc, kafkaParams, checkOffsets(kafkaParams, offsetRanges),
+      messageHandler)
   }
 
   /**
@@ -313,10 +311,9 @@ object KafkaUtils {
       offsetRanges: Array[OffsetRange],
       messageHandler: ConsumerRecord[K, V] => R
     ): RDD[R] = sc.withScope {
-    val kc = new KafkaCluster(kafkaParams)
     val cleanedHandler = sc.clean(messageHandler)
-    checkOffsets(kc, offsetRanges)
-    new KafkaRDD[K, V, R](sc, kafkaParams, offsetRanges, cleanedHandler)
+    new KafkaRDD[K, V, R](sc, kafkaParams, checkOffsets(kafkaParams, offsetRanges),
+      cleanedHandler)
   }
   
   /**
@@ -386,31 +383,48 @@ object KafkaUtils {
   
   /** Make sure offsets are available in kafka, or throw an exception */
   private def checkOffsets(
-      kc: KafkaCluster,
-      offsetRanges: Array[OffsetRange]): Unit = {
-    val topics = offsetRanges.map(_.topicPartition).toSet
-    val low = kc.getEarliestOffsets(topics)
-    val high = kc.getLatestOffsets(topics)
-    val result = offsetRanges.filterNot { o =>
+      kafkaParams: Map[String, String],
+      offsetRanges: Array[OffsetRange]): Array[OffsetRange] = {
+    val kc = new KafkaCluster(kafkaParams)
+    try {
+      val topics = offsetRanges.map(_.topicPartition).toSet
+      val low = kc.getEarliestOffsets(topics)
+      val high = kc.getLatestOffsetsWithLeaders(topics)
+
+      val result = offsetRanges.filterNot { o =>
         low(o.topicPartition()) <= o.fromOffset &&
-        o.untilOffset <= high(o.topicPartition())
+          o.untilOffset <= high(o.topicPartition()).offset
+      }
+
+      if (!result.isEmpty) {
+        throw new SparkException("Offsets not available in Kafka: " + result.mkString(","))
+      }
+
+      offsetRanges.map { o =>
+        OffsetRange(o.topic, o.partition, o.fromOffset, o.untilOffset,
+          high(o.topicPartition()).host)
+      }
     }
-    
-    if (!result.isEmpty) {
-      throw new SparkException("Offsets not available in Kafka: " + result.mkString(","))
+    finally {
+      kc.close()
     }
   }
   
   private[kafka] def getFromOffsets(
-    kc: KafkaCluster,
     kafkaParams: Map[String, String],
     topics: Set[String]
   ): Map[TopicPartition, Long] = {
-    val reset = kafkaParams.get("auto.offset.reset").map(_.toLowerCase)
-    if (reset == Some("earliest")) {
-      kc.getEarliestOffsets(kc.getPartitions(topics))
-    } else {
-      kc.getLatestOffsets(kc.getPartitions(topics))
+    val kc = new KafkaCluster(kafkaParams)
+    try {
+      val reset = kafkaParams.get("auto.offset.reset").map(_.toLowerCase)
+      if (reset == Some("earliest")) {
+        kc.getEarliestOffsets(kc.getPartitions(topics))
+      } else {
+        kc.getLatestOffsets(kc.getPartitions(topics))
+      }
+    }
+    finally {
+      kc.close()
     }
   }
 }
@@ -502,9 +516,8 @@ private[kafka] class KafkaUtilsPythonHelper {
       }
       Map(fromOffsets.asScala.mapValues { _.longValue() }.toSeq: _*)
     } else {
-      val kc = new KafkaCluster(Map(kafkaParams.asScala.toSeq: _*))
       KafkaUtils.getFromOffsets(
-        kc, Map(kafkaParams.asScala.toSeq: _*), Set(topics.asScala.toSeq: _*))
+        Map(kafkaParams.asScala.toSeq: _*), Set(topics.asScala.toSeq: _*))
     }
 
     kafkaParams.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "ByteArrayDeserializer" )

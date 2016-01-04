@@ -32,7 +32,10 @@ import org.apache.kafka.common._
  */
 private[spark]
 class KafkaCluster(val kafkaParams: Map[String, String]) extends Serializable {
- 
+  import KafkaCluster.LeaderOffset
+
+  @transient protected var kc: KafkaConsumer[String, String] = null
+
   def getPartitions(topics: Set[String]): Set[TopicPartition] = {
     getPartitionInfo(topics).map { pi =>
       new TopicPartition(pi.topic, pi.partition)
@@ -61,19 +64,44 @@ class KafkaCluster(val kafkaParams: Map[String, String]) extends Serializable {
   def getLatestOffsets(
       topicPartitions: Set[TopicPartition]
     ): Map[TopicPartition, Long] =
-    getOffsets(topicPartitions, OffsetResetStrategy.LATEST)
-
+    getOffsetsWithoutLeaders(topicPartitions, OffsetResetStrategy.LATEST)
 
   def getEarliestOffsets(
       topicPartitions: Set[TopicPartition]
     ): Map[TopicPartition, Long] =
-    getOffsets(topicPartitions, OffsetResetStrategy.EARLIEST)
+    getOffsetsWithoutLeaders(topicPartitions, OffsetResetStrategy.EARLIEST)
+
+  def getLatestOffsetsWithLeaders(
+      topicPartitions: Set[TopicPartition]
+    ): Map[TopicPartition, LeaderOffset] =
+    getOffsets(topicPartitions, OffsetResetStrategy.LATEST)
+
+  private def getOffsetsWithoutLeaders(
+      topicPartitions: Set[TopicPartition],
+      offsetResetType: OffsetResetStrategy
+    ): Map[TopicPartition, Long] = {
+    getOffsets(topicPartitions, offsetResetType)
+      .map { t =>
+        (t._1, t._2.offset)
+      }
+  }
 
   def getOffsets(
-       topicPartitions: Set[TopicPartition],
-       offsetResetType: OffsetResetStrategy
-    ): Map[TopicPartition, Long] = {
+      topicPartitions: Set[TopicPartition],
+      offsetResetType: OffsetResetStrategy
+    ): Map[TopicPartition, LeaderOffset] = {
+    val topics = topicPartitions.map { _.topic }
     withConsumer{ consumer =>
+      val tplMap = topics.flatMap { topic =>
+        Option(consumer.partitionsFor(topic)) match {
+          case None =>
+            throw new SparkException("Topic doesnt exist " + topic)
+          case Some(piList) => piList.asScala.toList
+        }
+      }.map { pi =>
+        new TopicPartition(pi.topic, pi.partition) -> pi.leader.host
+      }.toMap
+
       consumer.assign(topicPartitions.toList.asJava)
       offsetResetType match {
         case OffsetResetStrategy.EARLIEST => consumer.seekToBeginning(topicPartitions.toList: _*)
@@ -82,24 +110,34 @@ class KafkaCluster(val kafkaParams: Map[String, String]) extends Serializable {
       }
       topicPartitions.map { tp =>
         val pos = consumer.position(tp)
-        tp -> pos
+        tp -> new LeaderOffset(tplMap(tp), pos)
       }.toMap
-      
-    }.asInstanceOf[Map[TopicPartition, Long]]
+
+    }.asInstanceOf[Map[TopicPartition, LeaderOffset]]
   }
 
   private def withConsumer
       (fn: KafkaConsumer[String, String] => Any): Any = {
-    val consumer = new KafkaConsumer[String, String](
-          kafkaParams.asInstanceOf[Map[String, Object]].asJava)
-    try {
-      fn(consumer)
-    } finally {
-      if (consumer != null) {
-          consumer.close()
-      }
+    if (kc == null ) {
+      kc = new KafkaConsumer[String, String](
+        kafkaParams.asInstanceOf[Map[String, Object]].asJava)
+    }
+    fn(kc)
+  }
+
+  def close(): Unit = {
+    if (kc !=  null) {
+      kc.close()
+      kc = null;
     }
   }
 
 }
 
+private[spark]
+object KafkaCluster {
+
+  private[spark]
+  case class LeaderOffset(host: String, offset: Long)
+
+}
