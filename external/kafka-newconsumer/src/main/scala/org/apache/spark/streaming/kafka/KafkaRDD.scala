@@ -50,6 +50,11 @@ class KafkaRDD[
     val offsetRanges: Array[OffsetRange],
     messageHandler: ConsumerRecord[K, V] => R
   ) extends RDD[R](sc, Nil) with Logging with HasOffsetRanges {
+
+  private val KAFKA_DEFAULT_POLL_TIME: String = "700"
+  private val pollTime = kafkaParams.get("spark.kafka.poll.time")
+    .getOrElse(KAFKA_DEFAULT_POLL_TIME).toInt
+
   override def getPartitions: Array[Partition] = {
     offsetRanges.zipWithIndex.map { case (o, i) =>
       new KafkaRDDPartition(i, o.topic, o.partition, o.fromOffset, o.untilOffset, o.leaderHost)
@@ -151,8 +156,8 @@ class KafkaRDD[
     var iter: Iterator[ConsumerRecord[K, V]] = null
 
     private def fetchBatch: Iterator[ConsumerRecord[K, V]] = {
-      consumer.seek(new TopicPartition(part.topic, part.partition), part.fromOffset)
-      val recs = consumer.poll(700) // this should be 0. Not working if below 700
+      consumer.seek(new TopicPartition(part.topic, part.partition), requestOffset)
+      val recs = consumer.poll(pollTime)
       recs.records(new TopicPartition(part.topic, part.partition)).iterator().asScala
     }
     
@@ -163,10 +168,19 @@ class KafkaRDD[
     }
 
     override def getNext(): R = {
+      if ( requestOffset == part.untilOffset ) {
+        finished = true
+        null.asInstanceOf[R]
+      }
+
       if (iter == null || !iter.hasNext) {
         iter = fetchBatch
       }
+
       if (!iter.hasNext) {
+        if ( requestOffset < part.untilOffset ) {
+          return getNext()
+        }
         assert(requestOffset == part.untilOffset, errRanOutBeforeEnd(part))
         finished = true
         null.asInstanceOf[R]
