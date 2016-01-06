@@ -67,7 +67,7 @@ val rdd = KafkaUtils.createRDD[String, String](
 ``` 
 
 ### Issues noted with Kafka 0.9.0 Consumer API
- - KafkaConsumer.poll(0) does not return any records when consumer offset is set to a position where data is available. Only poll(700) worked on my local Mac  
- - KafkaConsumer.position() seen to not return, when called very frequently at intervals below 200 ms
+ - KafkaConsumer.poll(0) does not return any records when consumer offset is set to a position where data is available. Only poll(700) worked on my local Mac. Fixed based on clarification from [Kafka](https://issues.apache.org/jira/browse/KAFKA-3044)
+ - KafkaConsumer.position() seen to not return, when called very frequently at intervals below 200 ms. Fixed by reducing and reusing KafkaConsumer instances
  - TopicPartition class is not Serializable, hence issues arise when serializing/deserialing DirectKafkaInputDStream. Opened issue in [Kafka JIRA](https://issues.apache.org/jira/browse/KAFKA-3029) and issued PR. Looks like it will get fixed :-) 
  
