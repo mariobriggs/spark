@@ -46,7 +46,7 @@ object DirectKafkaWordCount {
       System.exit(1)
     }
 
-    StreamingExamples.setStreamingLogLevels()
+    /* StreamingExamples.setStreamingLogLevels()
 
     val Array(brokers, topics) = args
 
@@ -63,12 +63,15 @@ object DirectKafkaWordCount {
     // Get the lines, split them into words, count the words and print
     val lines = messages.map(_._2)
     val words = lines.flatMap(_.split(" "))
-    val wordCounts = words.map(x => (x, 1L)).reduceByKey(_ + _)
+    val wordCounts = words.map(x => (x, 1L))
+      //.reduceByKey(_ + _)
+      .countByWindow(Seconds(30), Seconds(10))
     wordCounts.print()
 
     // Start the computation
     ssc.start()
     ssc.awaitTermination()
+    */
   }
 }
 // scalastyle:on println

@@ -20,12 +20,13 @@ package org.apache.spark.streaming.dstream
 
 import java.io.{IOException, ObjectInputStream, ObjectOutputStream}
 
+import scala.collection.mutable
 import scala.collection.mutable.HashMap
 import scala.language.implicitConversions
 import scala.reflect.ClassTag
 import scala.util.matching.Regex
 
-import org.apache.spark.{Logging, SparkContext, SparkException}
+import org.apache.spark.{HashPartitioner, Logging, SparkContext, SparkException}
 import org.apache.spark.rdd.{BlockRDD, PairRDDFunctions, RDD, RDDOperationScope}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming._
@@ -56,6 +57,8 @@ import org.apache.spark.util.{CallSite, Utils}
  *  - A time interval at which the DStream generates an RDD
  *  - A function that is used to generate an RDD after each time interval
  */
+
+case class EventWindow(first: Any, last: Any) {}
 
 abstract class DStream[T: ClassTag] (
     @transient private[streaming] var ssc: StreamingContext
@@ -848,6 +851,103 @@ abstract class DStream[T: ClassTag] (
       slideDuration: Duration): DStream[Long] = ssc.withScope {
     this.map(_ => 1L).reduceByWindow(_ + _, _ - _, windowDuration, slideDuration)
   }
+
+  def matchPatternByWindow(
+      pattern: scala.util.matching.Regex,
+      predicates: Map[String, (T, EventWindow) => Boolean],
+      windowDuration: Duration,
+      slideDuration: Duration
+    ): DStream[List[T]] = ssc.withScope {
+    new PMWindowedDStream[T](
+      this, pattern, predicates,
+      windowDuration, slideDuration, new HashPartitioner(1)
+    )
+  }
+
+  def getWithLast(): DStream[(Long, (T, T))] = {
+    val idStream = this.transform((rdd, time) => {
+      rdd.zipWithIndex().map(i => {(time.milliseconds + i._2, i._1)})
+    })
+    val previous = idStream.map(x => (x._1 + 1, x._2) )
+    idStream.join(previous).transform(rdd => {rdd.sortByKey()} )
+  }
+
+  def matchPattern(
+      pattern: scala.util.matching.Regex,
+      predicates: Map[String, (T, EventWindow) => Boolean]
+    ): DStream[List[T]] = ssc.withScope {
+
+    val idStream = this.transform((rdd, time) => {
+      // generate element with first element
+      val first = rdd.zipWithIndex().map(i => { (time.milliseconds + i._2, i._1)})
+      val min = if (!rdd.isEmpty()) {
+        first.reduce((e1, e2) => {
+          if (e1._1 < e2._1) {
+            e1
+          } else {
+            e2
+          }
+        })
+      } else {
+        (0L, null.asInstanceOf[T])
+      }
+      first.map(x => (x._1, (x._2, min._2)))
+    })
+
+    // generate element with just before element
+    val previous = idStream.map(x => (x._1 + 1, x._2._1) )
+    val all = idStream.join(previous).transform(rdd => {rdd.sortByKey()} )
+
+    // find matching predicate for each elem
+    val patternStream = all.map(x => {
+      var isMatch = false
+      var matchName = "NAN"
+      for (predicate <- predicates if !isMatch ) {
+        matchName = predicate._1
+        isMatch = predicate._2(x._2._1._1, EventWindow(x._2._1._2, x._2._2))
+      }
+      (matchName, x)
+    })
+
+    val transformFunc = (rdd: RDD[(String, T)], time: Time) => {
+      import scala.collection.mutable.ListBuffer
+      val stream = rdd.groupBy(_ => "all")
+        .map(_._2)
+        .map ( x => {
+          val it = x.iterator
+          val builder = new scala.collection.mutable.StringBuilder()
+          val map = scala.collection.mutable.HashMap[Long, T]()
+          var curLen = 1L
+          while (it.hasNext) {
+            val i = it.next()
+            builder.append(" " + i._1)
+            map.put(curLen, i._2)
+            curLen += i._1.length + 1
+          }
+          (builder.toString(), map)
+        })
+      stream.flatMap(y => {
+        val it = pattern.findAllIn(y._1)
+        val o = ListBuffer[List[T]]()
+
+        for (one <- it) {
+          var len = 0
+          var ctr = 0
+          val list = ListBuffer[T]()
+          one.split(" ").map(sub => {
+            y._2.get(it.start + len )foreach(list += _ )
+            len += sub.length + 1
+          })
+          o += list.toList
+        }
+        o.toList
+      })
+    }
+
+    patternStream.map(x => (x._1, x._2._2._1._1))
+      .transform((rdd, time) => {transformFunc(rdd, time)})
+  }
+
 
   /**
    * Return a new DStream in which each RDD contains the count of distinct elements in

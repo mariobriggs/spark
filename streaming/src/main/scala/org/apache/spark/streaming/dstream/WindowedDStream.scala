@@ -67,7 +67,8 @@ class WindowedDStream[T: ClassTag](
       logDebug("Using partition aware union for windowing at " + validTime)
       new PartitionerAwareUnionRDD(ssc.sc, rddsInWindow)
     } else {
-      logDebug("Using normal union for windowing at " + validTime)
+      println ("wds " + rddsInWindow.length)
+      logDebug("Using normal union for windowing at " + validTime )
       new UnionRDD(ssc.sc, rddsInWindow)
     }
     Some(windowRDD)

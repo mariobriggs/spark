@@ -82,6 +82,16 @@ class PairDStreamFunctions[K, V](self: DStream[(K, V)])
     reduceByKey(reduceFunc, defaultPartitioner())
   }
 
+  def matchPatternByKey(pattern: scala.util.matching.Regex,
+      predicates: Map[String, (V, V, V) => Boolean]
+    ): DStream[(K, V)] = ssc.withScope {
+
+    //val t = sortByKey(defaultPartitioner()).map(x => { x._2})
+    // sortByKey is ordered i.e. maintains initial order, so dont have to worry
+    
+    ???
+  }
+
   /**
    * Return a new DStream by applying `reduceByKey` to each RDD. The values for each key are
    * merged using the supplied reduce function. Hash partitioning is used to generate the RDDs

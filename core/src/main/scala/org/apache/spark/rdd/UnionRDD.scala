@@ -69,6 +69,7 @@ class UnionRDD[T: ClassTag](
       array(pos) = new UnionPartition(pos, rdd, rddIndex, split.index)
       pos += 1
     }
+    println(" uds getP " + rdds.map(_.partitions.length).sum)
     array
   }
 
@@ -79,6 +80,7 @@ class UnionRDD[T: ClassTag](
       deps += new RangeDependency(rdd, 0, pos, rdd.partitions.length)
       pos += rdd.partitions.length
     }
+    println("uds deps " + rdds.length)
     deps
   }
 
