@@ -80,6 +80,18 @@ class PMWindowedDStream[T: ClassTag](
     this
   }
 
+  private def getMin(rdds: Seq[RDD[(Long, (T, T))]]) = {
+    var t = None: Option[T]
+    if (rdds.length > 0) {
+      (0 to rdds.size-1).map(i => {
+        if (!rdds(i).isEmpty()) {
+          t = Some(rdds(i).take(1)(0)._2._1) // make this takeOrdered
+        }
+      })
+      t
+    }
+  }
+
   override def compute(validTime: Time): Option[RDD[List[T]]] = {
     val patternF = pattern
     val predicatesF = predicates
@@ -105,28 +117,32 @@ class PMWindowedDStream[T: ClassTag](
     //       old RDDs                     new RDDs
     //
 
+    println("")
+    println("----------------------------------------------------------")
     println("Time " + validTime )
+    println("----------------------------------------------------------")
+    println("")
+
     val newRDDs =
       asisStream.slice(previousWindow.endTime + parent.slideDuration, currentWindow.endTime)
-    logDebug("# new RDDs = " + newRDDs.size)
 
     val lastValidRDDs =
-      asisStream.slice(currentWindow.beginTime - parent.slideDuration, previousWindow.endTime)
+      asisStream.slice(currentWindow.beginTime, previousWindow.endTime)
 
-    val minVal = if (lastValidRDDs.length > 0) {
-      // TODO this should be over all lastValidRDDs and not just 0
-      if (!lastValidRDDs(0).isEmpty()) {
-        lastValidRDDs(0).take(1)(0)._2._1 // make this takeOrdered
-      } else { null.asInstanceOf[T] }
-    } else {
-      // TODO take from newRDD's
-      null.asInstanceOf[T]
+    val lastValidRDDsMin = getMin(lastValidRDDs)
+    val newRDDsMin = getMin(newRDDs)
+
+    val minVal = lastValidRDDsMin match {
+      case Some(i) => i.asInstanceOf[T]
+      case _ => newRDDsMin match {
+        case Some(j) => j.asInstanceOf[T]
+        case _ => null.asInstanceOf[T]
+      }
     }
 
     // Make the list of RDDs that needs to cogrouped together for reducing their reduced values
     val allRDDs = new ArrayBuffer[RDD[(Long, (T, T))]]()  ++= lastValidRDDs ++= newRDDs
     val allTransformed = new ArrayBuffer[RDD[(String, T)]]()
-
     val numAllRDDs = allRDDs.size
 
     (0 to numAllRDDs-1).map(i => {
@@ -136,8 +152,10 @@ class PMWindowedDStream[T: ClassTag](
           var isMatch = false
           var matchName = "NAN"
           for (predicate <- predicatesF if !isMatch) {
-            matchName = predicate._1
             isMatch = predicate._2(x._2._1, EventWindow(minVal, x._2._2))
+            if (isMatch) {
+              matchName = predicate._1
+            }
           }
           (matchName, x._2._1)
         })
@@ -182,6 +200,7 @@ class PMWindowedDStream[T: ClassTag](
 
     val result = new ArrayBuffer[RDD[(Long, List[T])]]()
     val size = allTransformed.size
+    // TODO this should not be a loop, but a cogroup rdd or union rdd
     (0 to size-1).map(i => {
       if (!allTransformed(i).isEmpty()) {
         result += transformFunc(allTransformed(i)).zipWithIndex().map(x => (x._2 + i, x._1))
@@ -189,6 +208,7 @@ class PMWindowedDStream[T: ClassTag](
     })
 
     if ( result.size > 0 ) {
+      // TODO can this be unionRDD
       val cogroupedRDD = new CoGroupedRDD[Long](result.toSeq.asInstanceOf[Seq[RDD[(Long, _)]]],
         partitioner)
       val x = cogroupedRDD.asInstanceOf[RDD[(Long, Array[Iterable[T]])]]
@@ -203,68 +223,5 @@ class PMWindowedDStream[T: ClassTag](
       Some( ssc.sc.makeRDD(Seq[List[T]]())
         .asInstanceOf[RDD[List[T]]] )
     }
-
-    /* val cogroupedRDD = new CoGroupedRDD[Long](allRDDs.toSeq.asInstanceOf[Seq[RDD[(Long, _)]]],
-      partitioner)
-
-    val rowWithMin = cogroupedRDD.asInstanceOf[RDD[(Long, Array[Iterable[T]])]]
-      .map( x => ((x._1), (x._2, minVal)) )
-
-    val prev = cogroupedRDD.asInstanceOf[RDD[(Long, Array[Iterable[T]])]]
-      .map( x => ((x._1 + 1), (x._2)) )
-
-    val dataForCb = rowWithMin.join(prev).sortByKey()
-    dataForCb.collect().foreach( println )
-    */
-
-    /* val numOldValues = lastValidRDDs.size
-    val numNewValues = newRDDs.size
-
-    val mergeValues = (arrayOfValues: Array[Iterable[T]]) => {
-      if (arrayOfValues.size != 1 + numOldValues + numNewValues) {
-        throw new Exception("Unexpected number of sequences of reduced values")
-      }
-      // Getting reduced values "old time steps" that will be removed from current window
-      val oldValues = (1 to numOldValues).map(i => arrayOfValues(i)).filter(!_.isEmpty).map(_.head)
-      // Getting reduced values "new time steps"
-      val newValues =
-        (1 to numNewValues).map(i => arrayOfValues(numOldValues + i)).filter(!_.isEmpty).map(_.head)
-
-      if (arrayOfValues(0).isEmpty) {
-        // If previous window's reduce value does not exist, then at least new values should exist
-        if (newValues.isEmpty) {
-          throw new Exception("Neither previous window has value for key, nor new values found. " +
-            "Are you sure your key class hashes consistently?")
-        }
-        // Reduce the new values
-        newValues.reduce(reduceF) // return
-      } else {
-        // Get the previous window's reduced value
-        var tempValue = arrayOfValues(0).head
-        // If old values exists, then inverse reduce then from previous value
-        if (!oldValues.isEmpty) {
-          tempValue = invReduceF(tempValue, oldValues.reduce(reduceF))
-        }
-        // If new values exists, then reduce them with previous value
-        if (!newValues.isEmpty) {
-          tempValue = reduceF(tempValue, newValues.reduce(reduceF))
-        }
-        tempValue // return
-      }
-    }
-
-    val mergedValuesRDD = cogroupedRDD.asInstanceOf[RDD[(Long, Array[Iterable[T]])]]
-
-    // .mapValues(mergeValues)
-
-    val x = Some(mergedValuesRDD)
-    x.isEmpty
-
-    //var _rdd: RDD[List[T]] = null;
-    //matchedStream.foreachRDD(rdd => _rdd = rdd)
-    //Some(_rdd) */
-    // Some(ssc.sc.makeRDD(Seq[List[String]](List("test", "again"), List("jesus my ", "saves")))
-    //  .asInstanceOf[RDD[List[T]]])
-
   }
 }

@@ -475,11 +475,10 @@ object DirectKafkaWordCount {
 
   import org.apache.spark.streaming._
 
+  case class Tick(symbol: String, price: Int, ts: Long)
+
   def main(args: Array[String]) {
-    /* if (args.length < 2) {
-      System.err.println("hello")
-      System.exit(1)
-    } */
+
 
     val brokers = "localhost:9092"
     val topics = "spark3"
@@ -497,48 +496,40 @@ object DirectKafkaWordCount {
     val messages = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
       ssc, kafkaParams, topicsSet)
 
-     /*def rise(in: String, first: String, prev: String): Boolean = {
-      //println {in + " " + first + "  " + prev }
-      return true
-    }
-    def drop(in: String, first: String, prev: String): Boolean = {
-      return false }
 
-    val preds: Map[String, (String, String, String) => Boolean] =
-      Map("rise" -> rise, "drop" -> drop)
-*/
-     def rise(in: String, ew: EventWindow): Boolean = {
-      //println {in + " " + ew.first + "  " + ew.last}
-      return true
-    }
-    def drop(in: String, eews: EventWindow): Boolean = {
-      println("NOOOOOOOOOOOOOOO")
-      return false
+     def rise(in: Tick, ew: EventWindow): Boolean = {
+       val r = in.price > ew.first.asInstanceOf[Tick].price  &&
+         in.price >= ew.last.asInstanceOf[Tick].price
+       // println( " r " + in + " " + ew.first + " " + ew.last  + " " + r)
+       r
+     }
+
+    def drop(in: Tick, ew: EventWindow): Boolean = {
+      val r = in.price >= ew.first.asInstanceOf[Tick].price  &&
+        in.price < ew.last.asInstanceOf[Tick].price
+      // println( " dr " + in + " " + ew.first + " " + ew.last  + " " + r)
+      r
     }
 
-    val preds: Map[String, (String, EventWindow) => Boolean] =
-      Map("rise" -> rise, "drop" -> drop)
+    def deep(in: Tick, ew: EventWindow): Boolean = {
+      val r = in.price < ew.first.asInstanceOf[Tick].price &&
+        in.price < ew.last.asInstanceOf[Tick].price
+      // println( " de " + in + " " + ew.first + " " + ew.last  + " " + r)
+      r
+    }
 
-
-    /* def rise(in: String): Boolean = { return true }
-    def drop(in: String): Boolean = { return false }
-    val preds: Map[String, String => Boolean] =
-      Map("rise" -> rise, "drop" -> drop) */
+    val preds: Map[String, (Tick, EventWindow) => Boolean] =
+      Map("rise" -> rise, "drop" -> drop, "deep" -> deep)
 
 
     // Get the lines, split them into words, count the words and print
-    val lines = messages.map(_._2)
-    val words = lines.flatMap(_.split(" "))
-    // val wordCounts = words.map(x => (x, 1L))
-      // .reduceByKey(_ + _)
-      //.countByWindow(Seconds(30), Seconds(10))
-      //.window(Seconds(12), Seconds(6))
-      //.matchPattern("rise rise".r, preds)
-      .matchPatternByWindow("rise rise".r, preds, Seconds(12), Seconds(6))
-    //words.count().print()
-    words.foreachRDD(_.collect().foreach( x => println("output " + x)))
+    val ticks = messages.map(_._2)
+      .map(_.split("[,:]")).map(p => Tick(p(1), p(3).trim.toInt, p(5).trim.toLong))
 
-    //val lines = messages.map(_._2)
+    val matches = ticks.matchPatternByWindow("rise drop rise rise deep".r,
+      preds, Seconds(12), Seconds(6))
+
+    matches.foreachRDD(_.collect().foreach( x => println("match " + x)))
 
     // Start the computation
     ssc.start()
