@@ -526,7 +526,7 @@ object DirectKafkaWordCount {
     val ticks = messages.map(_._2)
       .map(_.split("[,:]")).map(p => Tick(p(1), p(3).trim.toInt, p(5).trim.toLong))
 
-    val matches = ticks.matchPatternByWindow("rise drop rise rise deep".r,
+    val matches = ticks.matchPatternByWindow("rise drop [rise ]+ deep".r,
       preds, Seconds(12), Seconds(6))
 
     matches.foreachRDD(_.collect().foreach( x => println("match " + x)))

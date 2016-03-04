@@ -80,16 +80,17 @@ class PMWindowedDStream[T: ClassTag](
     this
   }
 
-  private def getMin(rdds: Seq[RDD[(Long, (T, T))]]) = {
-    var t = None: Option[T]
+  private def getMin(rdds: Seq[RDD[(Long, (T, T))]]): Option[T] = {
+    // TODO, if we have more than 1 RDD, we can do a reduce to be sure
+    // we have the min. For now just assumes first valid RDD is the min
     if (rdds.length > 0) {
       (0 to rdds.size-1).map(i => {
         if (!rdds(i).isEmpty()) {
-          t = Some(rdds(i).take(1)(0)._2._1) // make this takeOrdered
+          return Some(rdds(i).take(1)(0)._2._1) // make this takeOrdered
         }
       })
-      t
     }
+    None: Option[T]
   }
 
   override def compute(validTime: Time): Option[RDD[List[T]]] = {
