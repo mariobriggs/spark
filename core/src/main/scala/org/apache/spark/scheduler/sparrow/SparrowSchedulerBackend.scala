@@ -121,11 +121,8 @@ class SparrowSchedulerBackend(scheduler: SparrowScheduler)
         if (executorDataMap.contains(executorId)) {
           context.reply(RegisterExecutorFailed("Duplicate executor ID: " + executorId))
         } else {
-          // If the executor's rpc env is not listening for incoming connections, `hostPort`
-          // will be null, and the client connection should be used to contact the executor.
-
           logInfo(s"Registered executor $executorRef with ID $executorId")
-          //addressToExecutorId(executorAddress) = executorId
+          addressToExecutorId(executorRef.address) = executorId
           totalCoreCount.addAndGet(cores)
           totalRegisteredExecutors.addAndGet(1)
           val data = new ExecutorData(executorRef, executorRef.address, executorId,

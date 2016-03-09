@@ -55,12 +55,11 @@ class SparrowExecutorBackend(driverUrl: String,
   extends ExecutorBackend with Logging with BackendService.Iface with ThreadSafeRpcEndpoint {
   private val executor: Executor = new Executor(
     env.executorId, Utils.localHostName, env)
-
+  private val conf = env.conf
   override def onStart() {
     logInfo("Connecting to driver: " + driverUrl)
     env.rpcEnv.asyncSetupEndpointRefByURI(driverUrl).flatMap { ref =>
       // This is a very fast action so we can use "ThreadUtils.sameThread"
-      //driver = Some(ref)
       ref.ask[RegisterExecutorResponse](RegisterExecutor(executorId, self, cores,
         Map[String, String]()))
     }(ThreadUtils.sameThread).onComplete {
@@ -68,19 +67,18 @@ class SparrowExecutorBackend(driverUrl: String,
       case Success(msg) =>
         logInfo(s"got $msg from driver.")
         initialize()
-      case Failure(e) => {
+      case Failure(e) =>
         logError(s"Cannot register with driver: $driverUrl", e)
         System.exit(1)
-      }
     }(ThreadUtils.sameThread)
   }
   // If this ExecutorBackend is changed to support multiple threads, then this may need
   // to be changed so that we don't share the serializer instance across threads
   private[this] val ser: SerializerInstance = env.closureSerializer.newInstance()
 
-  // TODO: Make this configurable.
-  private val nodeMonitorAddress = new InetSocketAddress("localhost", 20501)
-  private val appName = System.getProperty("sparrow.app.name", "spark")
+  private val nodeMonitorAddress =
+    new InetSocketAddress(conf.get("sparrow.nm.host", "localhost"), conf.getInt("sparrow.nm.port", 20501))
+  private val appName = conf.get("sparrow.app.name", "spark")
 
   private val taskIdToFullTaskId = new HashMap[Long, TFullTaskId]()
   private val clientPool = new ThriftClientPool[NodeMonitorService.AsyncClient](
@@ -215,7 +213,7 @@ object SparrowExecutorBackend extends Logging {
     var appId: String = null
 
     var argv = args.toList
-    while (!argv.isEmpty) {
+    while (argv.nonEmpty) {
       argv match {
         case ("--driver-url") :: value :: tail =>
           driverUrl = value
@@ -270,6 +268,7 @@ object SparrowExecutorBackend extends Logging {
         |   --hostname <hostname> (optional, defaults to auto detecting)
         |   --cores <cores> (defaults to 1)
         |   --app-id <appid> (defaults to 'spark')
+        |   --user-class-path <url>
         | """.stripMargin)
     // scalastyle:on println
     System.exit(1)

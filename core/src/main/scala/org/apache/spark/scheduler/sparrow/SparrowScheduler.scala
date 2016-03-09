@@ -42,7 +42,7 @@ import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
 
 private[spark] class SparrowScheduler(val sc: SparkContext,
-                                      host: String, port: String, frameworkName: String)
+    host: String, port: String, frameworkName: String)
   extends TaskScheduler with FrontendService.Iface with Logging {
   private var backend: SchedulerBackend = null
 
@@ -54,7 +54,7 @@ private[spark] class SparrowScheduler(val sc: SparkContext,
   // Mapping of task ids to Tasks because we need to pass a Task back to the listener on task end.
   private val tidToTask = new HashMap[String, Task[_]]()
 
-  private var ser = SparkEnv.get.closureSerializer.newInstance()
+  private val ser = SparkEnv.get.closureSerializer.newInstance()
 
   // The pool is just used for the UI -- so fine if we don't set it.
   val schedulingMode: SchedulingMode = SchedulingMode.withName("FIFO")
@@ -182,10 +182,9 @@ private[spark] class SparrowScheduler(val sc: SparkContext,
     * indicating that the block manager should re-register.
     */
   override def executorHeartbeatReceived(
-                                          execId: String,
-                                          accumUpdates: Array[(Long, Seq[AccumulableInfo])],
-                                          blockManagerId: BlockManagerId): Boolean = {
-    // (taskId, stageId, stageAttemptId, accumUpdates)
+      execId: String,
+      accumUpdates: Array[(Long, Seq[AccumulableInfo])],
+      blockManagerId: BlockManagerId): Boolean = {
     val accumUpdatesWithTaskIds: Array[(Long, Int, Int, Seq[AccumulableInfo])] = synchronized {
       accumUpdates.flatMap { case (id, updates) =>
           Seq((id, -1, -1, updates)) // FIXME Fudged values.
