@@ -31,7 +31,7 @@ class RecurringTimerSuite extends SparkFunSuite with PrivateMethodTester {
   test("basic") {
     val clock = new ManualClock()
     val results = new mutable.ArrayBuffer[Long]() with mutable.SynchronizedBuffer[Long]
-    val timer = new RecurringTimer(clock, 100, time => {
+    val timer = new RecurringTimer(clock, 100, (time, actual) => {
       results += time
     }, "RecurringTimerSuite-basic")
     timer.start(0)
@@ -52,7 +52,7 @@ class RecurringTimerSuite extends SparkFunSuite with PrivateMethodTester {
   test("SPARK-10224: call 'callback' after stopping") {
     val clock = new ManualClock()
     val results = new mutable.ArrayBuffer[Long]() with mutable.SynchronizedBuffer[Long]
-    val timer = new RecurringTimer(clock, 100, time => {
+    val timer = new RecurringTimer(clock, 100, (time, actual) => {
       results += time
     }, "RecurringTimerSuite-SPARK-10224")
     timer.start(0)

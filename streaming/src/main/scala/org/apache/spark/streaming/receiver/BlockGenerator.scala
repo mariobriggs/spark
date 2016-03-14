@@ -229,7 +229,7 @@ private[streaming] class BlockGenerator(
   def isStopped(): Boolean = state == StoppedAll
 
   /** Change the buffer to which single records are added to. */
-  private def updateCurrentBuffer(time: Long): Unit = {
+  private def updateCurrentBuffer(time: Long, actual: Long): Unit = {
     try {
       var newBlock: Block = null
       synchronized {

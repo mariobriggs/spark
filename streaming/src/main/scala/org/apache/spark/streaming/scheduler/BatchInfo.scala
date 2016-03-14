@@ -34,12 +34,23 @@ import org.apache.spark.streaming.Time
 @DeveloperApi
 case class BatchInfo(
     batchTime: Time,
+    addl: AddlTime,
     streamIdToInputInfo: Map[Int, StreamInputInfo],
     submissionTime: Long,
     processingStartTime: Option[Long],
     processingEndTime: Option[Long],
     outputOperationInfos: Map[Int, OutputOperationInfo]
   ) {
+
+  def this(batchTime: Time,
+     streamIdToInputInfo: Map[Int, StreamInputInfo],
+     submissionTime: Long,
+     processingStartTime: Option[Long],
+     processingEndTime: Option[Long],
+     outputOperationInfos: Map[Int, OutputOperationInfo]) = this(batchTime,
+    AddlTime(Time(0), 0, 0, 0),
+    streamIdToInputInfo, submissionTime, processingStartTime, processingEndTime,
+    outputOperationInfos)
 
   @deprecated("Use streamIdToInputInfo instead", "1.5.0")
   def streamIdToNumRecords: Map[Int, Long] = streamIdToInputInfo.mapValues(_.numRecords)
@@ -70,4 +81,16 @@ case class BatchInfo(
    */
   def numRecords: Long = streamIdToInputInfo.values.map(_.numRecords).sum
 
+}
+
+object BatchInfo {
+  def apply(batchTime: Time,
+      streamIdToInputInfo: Map[Int, StreamInputInfo],
+      submissionTime: Long,
+      processingStartTime: Option[Long],
+      processingEndTime: Option[Long],
+      outputOperationInfos: Map[Int, OutputOperationInfo]): BatchInfo = new BatchInfo(batchTime,
+    AddlTime(Time(0), 0, 0, 0),
+    streamIdToInputInfo, submissionTime, processingStartTime, processingEndTime,
+    outputOperationInfos)
 }

@@ -26,7 +26,7 @@ import org.apache.spark.util.{Utils, Clock, EventLoop, ManualClock}
 
 /** Event classes for JobGenerator */
 private[scheduler] sealed trait JobGeneratorEvent
-private[scheduler] case class GenerateJobs(time: Time) extends JobGeneratorEvent
+private[scheduler] case class GenerateJobs(time: Time, actual: Time) extends JobGeneratorEvent
 private[scheduler] case class ClearMetadata(time: Time) extends JobGeneratorEvent
 private[scheduler] case class DoCheckpoint(
     time: Time, clearCheckpointDataLater: Boolean) extends JobGeneratorEvent
@@ -56,7 +56,8 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
   }
 
   private val timer = new RecurringTimer(clock, ssc.graph.batchDuration.milliseconds,
-    longTime => eventLoop.post(GenerateJobs(new Time(longTime))), "JobGenerator")
+    (longTime, actual) => eventLoop.post(GenerateJobs(new Time(longTime),
+      new Time(actual))), "JobGenerator")
 
   // This is marked lazy so that this is initialized after checkpoint duration has been set
   // in the context and the generator has been started.
@@ -178,7 +179,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
   private def processEvent(event: JobGeneratorEvent) {
     logDebug("Got event " + event)
     event match {
-      case GenerateJobs(time) => generateJobs(time)
+      case GenerateJobs(time, actual) => generateJobs(time, actual)
       case ClearMetadata(time) => clearMetadata(time)
       case DoCheckpoint(time, clearCheckpointDataLater) =>
         doCheckpoint(time, clearCheckpointDataLater)
@@ -229,7 +230,9 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
       // added but not allocated, are dangling in the queue after recovering, we have to allocate
       // those blocks to the next batch, which is the batch they were supposed to go.
       jobScheduler.receiverTracker.allocateBlocksToBatch(time) // allocate received blocks to batch
-      jobScheduler.submitJobSet(JobSet(time, graph.generateJobs(time)))
+      jobScheduler.submitJobSet(JobSet(time,
+        AddlTime(Time(0), 0L, 0L, 0L),
+        graph.generateJobs(time)))
     }
 
     // Restart the timer
@@ -238,18 +241,26 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
   }
 
   /** Generate jobs and perform checkpoint for the given `time`.  */
-  private def generateJobs(time: Time) {
+  private def generateJobs(time: Time, act: Time) {
     // Set the SparkEnv in this thread, so that job generation code can access the environment
     // Example: BlockRDDs are created in this thread, and it needs to access BlockManager
     // Update: This is probably redundant after threadlocal stuff in SparkEnv has been removed.
     SparkEnv.set(ssc.env)
+    var allocBlockEnd = -1L
+    var genJobEnd = -1L
     Try {
       jobScheduler.receiverTracker.allocateBlocksToBatch(time) // allocate received blocks to batch
-      graph.generateJobs(time) // generate jobs using allocated block
+      allocBlockEnd = System.currentTimeMillis()
+      val job = graph.generateJobs(time) // generate jobs using allocated block
+      genJobEnd = System.currentTimeMillis()
+      job
     } match {
       case Success(jobs) =>
         val streamIdToInputInfos = jobScheduler.inputInfoTracker.getInfo(time)
-        jobScheduler.submitJobSet(JobSet(time, jobs, streamIdToInputInfos))
+        val streamEnd = System.currentTimeMillis()
+        jobScheduler.submitJobSet(JobSet(time, AddlTime(act, allocBlockEnd, genJobEnd, streamEnd),
+          jobs, streamIdToInputInfos))
+
       case Failure(e) =>
         jobScheduler.reportError("Error generating jobs for time " + time, e)
     }

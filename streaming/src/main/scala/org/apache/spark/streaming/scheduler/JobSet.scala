@@ -26,9 +26,12 @@ import org.apache.spark.util.Utils
 /** Class representing a set of Jobs
   * belong to the same batch.
   */
+case class AddlTime(actual: Time, allocBlockEnd: Long, genEnd: Long, streamEnd: Long )
+
 private[streaming]
 case class JobSet(
     time: Time,
+    addl: AddlTime,
     jobs: Seq[Job],
     streamIdToInputInfo: Map[Int, StreamInputInfo] = Map.empty) {
 
@@ -66,6 +69,7 @@ case class JobSet(
   def toBatchInfo: BatchInfo = {
     BatchInfo(
       time,
+      addl,
       streamIdToInputInfo,
       submissionTime,
       if (processingStartTime >= 0) Some(processingStartTime) else None,

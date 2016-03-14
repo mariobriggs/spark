@@ -21,7 +21,7 @@ import org.apache.spark.Logging
 import org.apache.spark.util.{Clock, SystemClock}
 
 private[streaming]
-class RecurringTimer(clock: Clock, period: Long, callback: (Long) => Unit, name: String)
+class RecurringTimer(clock: Clock, period: Long, callback: (Long, Long) => Unit, name: String)
   extends Logging {
 
   private val thread = new Thread("RecurringTimer - " + name) {
@@ -90,8 +90,8 @@ class RecurringTimer(clock: Clock, period: Long, callback: (Long) => Unit, name:
   }
 
   private def triggerActionForNextInterval(): Unit = {
-    clock.waitTillTime(nextTime)
-    callback(nextTime)
+    val actual = clock.waitTillTime(nextTime)
+    callback(nextTime, actual)
     prevTime = nextTime
     nextTime += period
     logDebug("Callback for " + name + " called at time " + prevTime)
@@ -119,7 +119,7 @@ object RecurringTimer extends Logging {
     var lastRecurTime = 0L
     val period = 1000
 
-    def onRecur(time: Long) {
+    def onRecur(time: Long, act: Long) {
       val currentTime = System.currentTimeMillis()
       logInfo("" + currentTime + ": " + (currentTime - lastRecurTime))
       lastRecurTime = currentTime
