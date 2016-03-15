@@ -231,7 +231,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
       // those blocks to the next batch, which is the batch they were supposed to go.
       jobScheduler.receiverTracker.allocateBlocksToBatch(time) // allocate received blocks to batch
       jobScheduler.submitJobSet(JobSet(time,
-        AddlTime(Time(0), 0L, 0L, 0L),
+        AddlTime(Time(0), 0L, 0L, 0L, 0L),
         graph.generateJobs(time)))
     }
 
@@ -242,6 +242,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
 
   /** Generate jobs and perform checkpoint for the given `time`.  */
   private def generateJobs(time: Time, act: Time) {
+    val eventProcTime = System.currentTimeMillis()
     // Set the SparkEnv in this thread, so that job generation code can access the environment
     // Example: BlockRDDs are created in this thread, and it needs to access BlockManager
     // Update: This is probably redundant after threadlocal stuff in SparkEnv has been removed.
@@ -258,7 +259,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
       case Success(jobs) =>
         val streamIdToInputInfos = jobScheduler.inputInfoTracker.getInfo(time)
         val streamEnd = System.currentTimeMillis()
-        jobScheduler.submitJobSet(JobSet(time, AddlTime(act, allocBlockEnd, genJobEnd, streamEnd),
+        jobScheduler.submitJobSet(JobSet(time, AddlTime(act, eventProcTime, allocBlockEnd, genJobEnd, streamEnd),
           jobs, streamIdToInputInfos))
 
       case Failure(e) =>
