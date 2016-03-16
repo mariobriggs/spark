@@ -48,7 +48,7 @@ case class BatchInfo(
      processingStartTime: Option[Long],
      processingEndTime: Option[Long],
      outputOperationInfos: Map[Int, OutputOperationInfo]) = this(batchTime,
-    AddlTime(Time(0), 0, 0, 0, 0),
+    AddlTime(Time(0), 0, 0, KafkaTData(0, 0), 0, 0),
     streamIdToInputInfo, submissionTime, processingStartTime, processingEndTime,
     outputOperationInfos)
 
@@ -90,7 +90,7 @@ object BatchInfo {
       processingStartTime: Option[Long],
       processingEndTime: Option[Long],
       outputOperationInfos: Map[Int, OutputOperationInfo]): BatchInfo = new BatchInfo(batchTime,
-    AddlTime(Time(0), 0, 0, 0, 0),
+    AddlTime(Time(0), 0, 0, KafkaTData(0, 0), 0, 0),
     streamIdToInputInfo, submissionTime, processingStartTime, processingEndTime,
     outputOperationInfos)
 }

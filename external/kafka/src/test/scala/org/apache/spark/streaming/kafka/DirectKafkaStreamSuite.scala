@@ -470,3 +470,54 @@ private[streaming] class ConstantEstimator(@volatile private var rate: Long)
       schedulingDelay: Long): Option[Double] = Some(rate)
 }
 
+object TweetHashTagCounter {
+
+  import org.apache.spark.streaming._
+
+  def main(args: Array[String]) {
+    val brokers = "localhost:9092"
+    val topics = "tweets"
+
+
+    // Create context with 2 second batch interval
+    val sparkConf = new SparkConf().setMaster("local[*]").setAppName("TweetHashTagCounter")
+    val ssc = new StreamingContext(sparkConf, Seconds(6))
+    //ssc.checkpoint("/Users/mbriggs/work/stc/projects/logs")
+
+    // Create direct kafka stream with brokers and topics
+    val topicsSet = topics.split(",").toSet
+    val kafkaParams = Map[String, String]("metadata.broker.list" -> brokers,
+      "auto.offset.reset" -> "smallest")
+
+    // Read a stream of message from kafka
+    val messages = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
+      ssc, kafkaParams, topicsSet)
+
+    val lines = messages.map(_._2)
+    val hashTags = lines.flatMap(status => status.split(" ").filter(_.startsWith("#")))
+    val topCounts60 = hashTags.map((_, 1)).reduceByKeyAndWindow(_ + _, Seconds(12))
+      .map { case (topic, count) => (count, topic) }
+      .transform(_.sortByKey(false))
+
+    topCounts60.foreachRDD(rdd => {
+      val topList = rdd.take(10)
+
+      topList.foreach { case (count, tag) =>
+        println(count + " " + tag)
+      }
+
+    })
+
+
+    ssc.start()
+    ssc.awaitTermination()
+
+    //matches.foreachRDD(_.collect().foreach( x => println("match " + x)))
+
+    // Start the computation
+
+  }
+
+}
+
+

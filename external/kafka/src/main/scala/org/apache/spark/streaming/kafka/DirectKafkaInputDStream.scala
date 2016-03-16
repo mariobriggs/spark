@@ -142,6 +142,8 @@ class DirectKafkaInputDStream[
   }
 
   override def compute(validTime: Time): Option[KafkaRDD[K, V, U, T, R]] = {
+    import org.apache.spark.streaming.scheduler.{TimingMap, KafkaTData}
+    val st = System.currentTimeMillis()
     val untilOffsets = clamp(latestLeaderOffsets(maxRetries))
     val rdd = KafkaRDD[K, V, U, T, R](
       context.sparkContext, kafkaParams, currentOffsets, untilOffsets, messageHandler)
@@ -166,6 +168,8 @@ class DirectKafkaInputDStream[
     ssc.scheduler.inputInfoTracker.reportInfo(validTime, inputInfo)
 
     currentOffsets = untilOffsets.map(kv => kv._1 -> kv._2.offset)
+
+    TimingMap.map.put(validTime, KafkaTData(st,System.currentTimeMillis()))
     Some(rdd)
   }
 
@@ -212,3 +216,5 @@ class DirectKafkaInputDStream[
     override def publish(rate: Long): Unit = ()
   }
 }
+
+

@@ -232,7 +232,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
       // those blocks to the next batch, which is the batch they were supposed to go.
       jobScheduler.receiverTracker.allocateBlocksToBatch(time) // allocate received blocks to batch
       jobScheduler.submitJobSet(JobSet(time,
-        AddlTime(Time(0), 0L, 0L, 0L, 0L),
+        AddlTime(Time(0), 0L, 0L, KafkaTData(0, 0), 0L, 0L),
         graph.generateJobs(time)))
     }
 
@@ -255,12 +255,15 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
       allocBlockEnd = System.currentTimeMillis()
       val job = graph.generateJobs(time) // generate jobs using allocated block
       genJobEnd = System.currentTimeMillis()
+      println( "Kafkadata " + TimingMap.map.get(time).get)
       job
     } match {
       case Success(jobs) =>
         val streamIdToInputInfos = jobScheduler.inputInfoTracker.getInfo(time)
         val streamEnd = System.currentTimeMillis()
-        jobScheduler.submitJobSet(JobSet(time, AddlTime(act, eventProcTime, allocBlockEnd, genJobEnd, streamEnd),
+        jobScheduler.submitJobSet(JobSet(time,
+          AddlTime(act, eventProcTime, allocBlockEnd, TimingMap.map.get(time).get,
+            genJobEnd, streamEnd),
           jobs, streamIdToInputInfos))
 
       case Failure(e) =>
@@ -312,4 +315,13 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
   private def markBatchFullyProcessed(time: Time) {
     lastProcessedBatch = time
   }
+}
+
+case class KafkaTData(start: Long, end: Long)
+
+object TimingMap {
+
+  import scala.collection.mutable.Map
+  val map: Map[Time, KafkaTData] =  Map()
+
 }

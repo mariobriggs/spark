@@ -26,7 +26,8 @@ import org.apache.spark.util.Utils
 /** Class representing a set of Jobs
   * belong to the same batch.
   */
-case class AddlTime(actual: Time, queTime: Long, allocBlockEnd: Long, genEnd: Long, streamEnd: Long )
+case class AddlTime(actual: Time, queTime: Long, allocBlockEnd: Long,
+  kafka: KafkaTData, genEnd: Long, streamEnd: Long )
 
 private[streaming]
 case class JobSet(
