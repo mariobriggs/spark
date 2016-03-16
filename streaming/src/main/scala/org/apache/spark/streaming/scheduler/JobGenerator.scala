@@ -255,7 +255,6 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
       allocBlockEnd = System.currentTimeMillis()
       val job = graph.generateJobs(time) // generate jobs using allocated block
       genJobEnd = System.currentTimeMillis()
-      println( "Kafkadata " + TimingMap.map.get(time).get)
       job
     } match {
       case Success(jobs) =>
