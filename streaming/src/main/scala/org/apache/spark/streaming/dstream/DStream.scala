@@ -20,20 +20,19 @@ package org.apache.spark.streaming.dstream
 
 import java.io.{IOException, ObjectInputStream, ObjectOutputStream}
 
-import scala.collection.mutable
+import org.apache.spark.rdd.{BlockRDD, PairRDDFunctions, RDD, RDDOperationScope}
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.streaming.StreamingContext.rddToFileName
+import org.apache.spark.streaming._
+import org.apache.spark.streaming.scheduler.Job
+import org.apache.spark.streaming.ui.UIUtils
+import org.apache.spark.util.{CallSite, Utils}
+import org.apache.spark.{HashPartitioner, Logging, SparkContext, SparkException}
+
 import scala.collection.mutable.HashMap
 import scala.language.implicitConversions
 import scala.reflect.ClassTag
 import scala.util.matching.Regex
-
-import org.apache.spark.{HashPartitioner, Logging, SparkContext, SparkException}
-import org.apache.spark.rdd.{BlockRDD, PairRDDFunctions, RDD, RDDOperationScope}
-import org.apache.spark.storage.StorageLevel
-import org.apache.spark.streaming._
-import org.apache.spark.streaming.StreamingContext.rddToFileName
-import org.apache.spark.streaming.scheduler.Job
-import org.apache.spark.streaming.ui.UIUtils
-import org.apache.spark.util.{CallSite, Utils}
 
 /**
  * A Discretized Stream (DStream), the basic abstraction in Spark Streaming, is a continuous
@@ -858,6 +857,9 @@ abstract class DStream[T: ClassTag] (
       windowDuration: Duration,
       slideDuration: Duration
     ): DStream[List[T]] = ssc.withScope {
+
+    //create a new dstresm of updateByKey
+    // or getorelse -
     new PMWindowedDStream[T](
       this, pattern, predicates,
       windowDuration, slideDuration, new HashPartitioner(1)

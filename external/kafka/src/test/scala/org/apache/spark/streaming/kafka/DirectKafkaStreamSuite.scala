@@ -19,29 +19,25 @@ package org.apache.spark.streaming.kafka
 
 import java.io.File
 import java.util.Arrays
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentLinkedQueue
-
-import scala.collection.JavaConverters._
-import scala.concurrent.duration._
-import scala.language.postfixOps
+import java.util.concurrent.atomic.AtomicLong
 
 import kafka.common.TopicAndPartition
 import kafka.message.MessageAndMetadata
 import kafka.serializer.StringDecoder
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
-import org.scalatest.concurrent.Eventually
-
-import org.apache.spark.{Logging, SparkConf, SparkContext, SparkFunSuite}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.streaming.{Milliseconds, StreamingContext, Time}
-import org.apache.spark.streaming.dstream.{EventWindow, DStream}
-import org.apache.spark.streaming.kafka.KafkaCluster.LeaderOffset
+import org.apache.spark.streaming.dstream.{DStream, EventWindow}
 import org.apache.spark.streaming.scheduler._
 import org.apache.spark.streaming.scheduler.rate.RateEstimator
+import org.apache.spark.streaming.{Milliseconds, StreamingContext, Time}
 import org.apache.spark.util.Utils
+import org.apache.spark.{Logging, SparkConf, SparkContext, SparkFunSuite}
+import org.scalatest.concurrent.Eventually
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 
-import scala.reflect.ClassTag
+import scala.collection.JavaConverters._
+import scala.concurrent.duration._
+import scala.language.postfixOps
 
 class DirectKafkaStreamSuite
   extends SparkFunSuite
@@ -481,13 +477,13 @@ object DirectKafkaWordCount {
 
 
     val brokers = "localhost:9092"
-    val topics = "spark3"
+    val topics = "test"
     //val Array(brokers, topics) = args
 
     // Create context with 2 second batch interval
     val sparkConf = new SparkConf().setMaster("local[*]").setAppName("DirectKafkaWordCount")
     val ssc = new StreamingContext(sparkConf, Seconds(6))
-    ssc.checkpoint("/Users/mbriggs/work/stc/projects/logs")
+   ssc.checkpoint("/tmp/checkpoint/logs")
 
     // Create direct kafka stream with brokers and topics
     val topicsSet = topics.split(",").toSet

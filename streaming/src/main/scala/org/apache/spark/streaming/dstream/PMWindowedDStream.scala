@@ -18,26 +18,25 @@
 package org.apache.spark.streaming.dstream
 
 import org.apache.spark.Partitioner
-import org.apache.spark.rdd.{CoGroupedRDD, RDD}
+import org.apache.spark.rdd.{PartitionerAwareUnionRDD, RDD, UnionRDD}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.{Duration, Interval, Time}
 
-import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 /**
-  * Created by mbriggs on 26/02/16.
-  */
+ * Created by mbriggs on 26/02/16.
+ */
 
 private[streaming]
 class PMWindowedDStream[T: ClassTag](
-    parent: DStream[T],
-    pattern: scala.util.matching.Regex,
-    predicates: Map[String, (T, EventWindow) => Boolean],
-    _windowDuration: Duration,
-    _slideDuration: Duration,
-    partitioner: Partitioner
-  ) extends DStream[List[T]](parent.ssc) {
+                                      parent: DStream[T],
+                                      pattern: scala.util.matching.Regex,
+                                      predicates: Map[String, (T, EventWindow) => Boolean],
+                                      _windowDuration: Duration,
+                                      _slideDuration: Duration,
+                                      partitioner: Partitioner
+                                      ) extends DStream[List[T]](parent.ssc) {
 
   require(_windowDuration.isMultipleOf(parent.slideDuration),
     "The window duration of ReducedWindowedDStream (" + _windowDuration + ") " +
@@ -49,19 +48,11 @@ class PMWindowedDStream[T: ClassTag](
       "must be multiple of the slide duration of parent DStream (" + parent.slideDuration + ")"
   )
 
-  // Reduce each batch of data using reduceByKey which will be further reduced by window
-  // by ReducedWindowedDStream
-  private val asisStream = parent.getWithLast
-
-    //parent.map(x => (1L, x))
-
-  // Persist RDDs to memory by default as these RDDs are going to be reused.
   super.persist(StorageLevel.MEMORY_ONLY_SER)
-  asisStream.persist(StorageLevel.MEMORY_ONLY_SER)
 
   def windowDuration: Duration = _windowDuration
 
-  override def dependencies: List[DStream[_]] = List(asisStream)
+  override def dependencies: List[DStream[_]] = List(parent)
 
   override def slideDuration: Duration = _slideDuration
 
@@ -69,160 +60,150 @@ class PMWindowedDStream[T: ClassTag](
 
   override def parentRememberDuration: Duration = rememberDuration + windowDuration
 
-  override def persist(storageLevel: StorageLevel): DStream[List[T]] = {
-    super.persist(storageLevel)
-    asisStream.persist(storageLevel)
-    this
-  }
 
-  override def checkpoint(interval: Duration): DStream[List[T]] = {
-    super.checkpoint(interval)
-    this
-  }
-
-  private def getMin(rdds: Seq[RDD[(Long, (T, T))]]): Option[T] = {
-    // TODO, if we have more than 1 RDD, we can do a reduce to be sure
-    // we have the min. For now just assumes first valid RDD is the min
-    if (rdds.length > 0) {
-      (0 to rdds.size-1).map(i => {
-        if (!rdds(i).isEmpty()) {
-          return Some(rdds(i).take(1)(0)._2._1) // make this takeOrdered
+  val applyRegex = (rdd: RDD[(Long, (String, T))]) => {
+    val patternCopy = pattern
+    import scala.collection.mutable.ListBuffer
+    val stream = rdd.groupBy(_ => "all")
+      .map(_._2)
+      .map(x => {
+        val it = x.iterator
+        val builder = new scala.collection.mutable.StringBuilder()
+        val map = scala.collection.mutable.HashMap[Long, T] ()
+        var curLen = 1L
+        while (it.hasNext) {
+          val i = it.next()
+          builder.append(" " + i._2._1)
+          map.put(curLen, i._2._2)
+          curLen += i._2._1.length + 1
         }
+        (builder.toString(), map)
       })
-    }
-    None: Option[T]
+    stream.foreach (println)
+    stream.flatMap(y => {
+      val it = patternCopy.findAllIn(y._1)
+      val o = ListBuffer[List[T]] ()
+
+      for (one <- it) {
+        var len = 0
+        var ctr = 0
+        val list = ListBuffer[T] ()
+        one.split(" ").map(sub => {
+          y._2.get(it.start + len) foreach (list += _)
+          len += sub.length + 1
+        })
+        o += list.toList
+      }
+      o.toList
+    })
   }
 
   override def compute(validTime: Time): Option[RDD[List[T]]] = {
-    val patternF = pattern
-    val predicatesF = predicates
-    val currentTime = validTime
-    val currentWindow = new Interval(currentTime - windowDuration + parent.slideDuration,
-      currentTime)
-    val previousWindow = currentWindow - slideDuration
+    val predicatesCopy = predicates
+    val patternCopy = pattern;
+    val currentWindow = new Interval(validTime - windowDuration + parent.slideDuration, validTime)
+    val rddsInWindow = parent.slice(currentWindow)
 
-    logDebug("Window time = " + windowDuration)
-    logDebug("Slide time = " + slideDuration)
-    logDebug("ZeroTime = " + zeroTime)
-    logDebug("Current window = " + currentWindow)
-    logDebug("Previous window = " + previousWindow)
-
-    //  _____________________________
-    // |  previous window   _________|___________________
-    // |___________________|       current window        |  --------------> Time
-    //                     |_____________________________|
-    //
-    // |________ _________|          |________ _________|
-    //          |                             |
-    //          V                             V
-    //       old RDDs                     new RDDs
-    //
-
-    println("")
-    println("----------------------------------------------------------")
-    println("Time " + validTime )
-    println("----------------------------------------------------------")
-    println("")
-
-    val newRDDs =
-      asisStream.slice(previousWindow.endTime + parent.slideDuration, currentWindow.endTime)
-
-    val lastValidRDDs =
-      asisStream.slice(currentWindow.beginTime, previousWindow.endTime)
-
-    val lastValidRDDsMin = getMin(lastValidRDDs)
-    val newRDDsMin = getMin(newRDDs)
-
-    val minVal = lastValidRDDsMin match {
-      case Some(i) => i.asInstanceOf[T]
-      case _ => newRDDsMin match {
-        case Some(j) => j.asInstanceOf[T]
-        case _ => null.asInstanceOf[T]
-      }
+    val windowRDD = if (rddsInWindow.flatMap(_.partitioner).distinct.length == 1) {
+      logDebug("Using partition aware union for windowing at " + validTime)
+      new PartitionerAwareUnionRDD(ssc.sc, rddsInWindow)
+    } else {
+      println("wds " + rddsInWindow.length)
+      logDebug("Using normal union for windowing at " + validTime)
+      new UnionRDD(ssc.sc, rddsInWindow)
     }
+    println(windowRDD.count())
+    //windowRDD.foreach(println)
+    //fix empty collection problem
+    val min = windowRDD.count() match {
+      case x if (x > 0) => windowRDD.first();
+    }
+    val zippedRdd= windowRDD.zipWithIndex()
 
-    // Make the list of RDDs that needs to cogrouped together for reducing their reduced values
-    val allRDDs = new ArrayBuffer[RDD[(Long, (T, T))]]()  ++= lastValidRDDs ++= newRDDs
-    val allTransformed = new ArrayBuffer[RDD[(String, T)]]()
-    val numAllRDDs = allRDDs.size
-
-    (0 to numAllRDDs-1).map(i => {
-      val rdd = allRDDs(i)
-      if (!rdd.isEmpty()) {
-        val mapped = rdd.map(x => {
-          var isMatch = false
-          var matchName = "NAN"
-          for (predicate <- predicatesF if !isMatch) {
-            isMatch = predicate._2(x._2._1, EventWindow(minVal, x._2._2))
-            if (isMatch) {
-              matchName = predicate._1
-            }
-          }
-          (matchName, x._2._1)
-        })
-        allTransformed += mapped
-      }
+    val keyRdd =zippedRdd.map(i => {
+      (i._2, i._1)
     })
 
-    val transformFunc = (rdd: RDD[(String, T)]) => {
-      import scala.collection.mutable.ListBuffer
-      val stream = rdd.groupBy(_ => "all")
-        .map(_._2)
-        .map ( x => {
-          val it = x.iterator
-          val builder = new scala.collection.mutable.StringBuilder()
-          val map = scala.collection.mutable.HashMap[Long, T]()
-          var curLen = 1L
-          while (it.hasNext) {
-            val i = it.next()
-            builder.append(" " + i._1)
-            map.put(curLen, i._2)
-            curLen += i._1.length + 1
-          }
-          (builder.toString(), map)
-        })
-      stream.flatMap(y => {
-        val it = patternF.findAllIn(y._1)
-        val o = ListBuffer[List[T]]()
+    //println(reversedWindowedRdd.count())
+    val previousKeyRdd = zippedRdd.map(i => {
+      (i._2 + 1, i._1)
+    })
 
-        for (one <- it) {
-          var len = 0
-          var ctr = 0
-          val list = ListBuffer[T]()
-          one.split(" ").map(sub => {
-            y._2.get(it.start + len )foreach(list += _ )
-            len += sub.length + 1
-          })
-          o += list.toList
+    val sortedpreviousMappedRdd = keyRdd.leftOuterJoin(previousKeyRdd).sortByKey()
+   // println(sortedpreviousMappedRdd.count())
+
+   // sortedpreviousMappedRdd.foreach(println)
+
+    val matchedRdd = sortedpreviousMappedRdd.map(x => {
+      var isMatch = false
+      var matchName = "NAN"
+      for (predicate <- predicatesCopy if !isMatch) {
+        isMatch = predicate._2(x._2._1, EventWindow(min, x._2._2.getOrElse(min)))
+        if (isMatch) {
+          matchName = predicate._1
         }
-        o.toList
-      })
-    }
-
-    val result = new ArrayBuffer[RDD[(Long, List[T])]]()
-    val size = allTransformed.size
-    // TODO this should not be a loop, but a cogroup rdd or union rdd
-    (0 to size-1).map(i => {
-      if (!allTransformed(i).isEmpty()) {
-        result += transformFunc(allTransformed(i)).zipWithIndex().map(x => (x._2 + i, x._1))
       }
+
+      (x._1, (matchName, x._2._1))
     })
 
-    if ( result.size > 0 ) {
-      // TODO can this be unionRDD
-      val cogroupedRDD = new CoGroupedRDD[Long](result.toSeq.asInstanceOf[Seq[RDD[(Long, _)]]],
-        partitioner)
-      val x = cogroupedRDD.asInstanceOf[RDD[(Long, Array[Iterable[T]])]]
-        .mapValues(x => {
-          val newValues =
-            (0 to result.size-1).map(i => x(i)).filter(!_.isEmpty).map(_.head)
-          newValues(0).asInstanceOf[List[T]]
-        })
-      Some(x.map(y => y._2))
-    }
-    else {
-      Some( ssc.sc.makeRDD(Seq[List[T]]())
-        .asInstanceOf[RDD[List[T]]] )
-    }
+    //matchedRdd.foreach(println)
+    println(matchedRdd.count())
+    Some(applyRegex(matchedRdd))
+
   }
+
+  //sortedpreviousMappedRdd.foreach(println)
+  //    val builder = new scala.collection.mutable.StringBuilder()
+  //    var curLen = 1L
+  //    val map = scala.collection.mutable.HashMap[Long, Long]()
+
+  //    val acc = new Accumulator("", StringAccumulatorParam, Some(""))
+  // var curLen: Long =  1L
+
+
+  //
+  //    val parsedRdd= matchedRdd.map(x => {
+  //      (x._1,(x._2_1+builder,x._2_2))
+  //    })
+
+  //    parsedRdd.foreach(println)
+  //  //matchedRdd.foreach(println)
+  //
+  //    val stream = builder.toString()
+  //
+  //    println("str"+stream+"str2")
+  //    val it = patternCopy.findAllIn(stream)
+  //
+  //    val o = ListBuffer[List[Long]]()
+  //    for (one <- it) {
+  //      var len = 0
+  //      var ctr = 0
+  //      val list = ListBuffer[Long]()
+  //      one.split(" ").map(sub => {
+  //        map.get(it.start + len) foreach (list += _)
+  //        len += sub.length + 1
+  //      })
+  //      o += list.toList
+  //    }
+  //
+  //    val matchList = o.toList
+  //
+  //    matchList.foreach(println)
+  //    val finalRdd = matchedRdd.filter
+  //     { case x =>
+  //        {var flag =false
+  //          for (list <- matchList) {
+  //          if (list.contains(x._1))
+  //            flag=true
+  //        }
+  //          flag
+  //        }
+  //      }
+  //finalRdd.foreach(println)
+  //Some(finalRdd.map(x => List(x._2._2)))
+
+  //  }
+
+
 }
