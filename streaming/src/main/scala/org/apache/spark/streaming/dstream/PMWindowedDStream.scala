@@ -17,7 +17,7 @@
 
 package org.apache.spark.streaming.dstream
 
-import org.apache.spark.Partitioner
+import org.apache.spark.{SparkContext, Accumulator, Partitioner}
 import org.apache.spark.rdd.{PartitionerAwareUnionRDD, RDD, UnionRDD}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.{Duration, Interval, Time}
@@ -28,6 +28,20 @@ import scala.reflect.ClassTag
  * Created by mbriggs on 26/02/16.
  */
 
+object PMWindowedDStream {
+  @volatile private var tracker: Accumulator[Long] = null
+
+  def getInstance(sc: SparkContext): Accumulator[Long] = {
+    if (tracker == null) {
+      synchronized {
+        if (tracker == null) {
+          tracker = sc.accumulator(0L, "PMWindowedDStream")
+        }
+      }
+    }
+    tracker
+  }
+}
 private[streaming]
 class PMWindowedDStream[T: ClassTag](
                                       parent: DStream[T],
@@ -69,41 +83,89 @@ class PMWindowedDStream[T: ClassTag](
       .map(x => {
         val it = x.iterator
         val builder = new scala.collection.mutable.StringBuilder()
-        val map = scala.collection.mutable.HashMap[Long, T] ()
+        val map = scala.collection.mutable.HashMap[Long, Long] ()
         var curLen = 1L
         while (it.hasNext) {
           val i = it.next()
           builder.append(" " + i._2._1)
-          map.put(curLen, i._2._2)
+          map.put(curLen, i._1)
           curLen += i._2._1.length + 1
         }
         (builder.toString(), map)
       })
-    stream.foreach (println)
-    stream.flatMap(y => {
+    stream.foreach(println)
+    val selectedIds = stream.flatMap(y => {
       val it = patternCopy.findAllIn(y._1)
-      val o = ListBuffer[List[T]] ()
-
+      val o = ListBuffer[List[Long]] ()
       for (one <- it) {
         var len = 0
         var ctr = 0
-        val list = ListBuffer[T] ()
+        val list = ListBuffer[Long] ()
+        val tracker = PMWindowedDStream.getInstance(this.ssc.sparkContext)
         one.split(" ").map(sub => {
-          y._2.get(it.start + len) foreach (list += _)
+          val id = y._2.get(it.start + len).getOrElse(0L)
+          list += id
+          if (tracker.value < id) {
+            tracker.setValue(id)
+          }
           len += sub.length + 1
         })
         o += list.toList
+        println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        println(tracker.value)
+        o.toList.foreach(println)
+        println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
       }
       o.toList
     })
+
+    //stuck here I changed map to store ( the pointer in string as key and id instead of T)
+    //what we need to do here is filter all elements based on selected ids and send them as return value
+    val x = selectedIds.flatMap(x => x)
+    val y = x.map(x => (x,x))
+    val z = rdd.join(y).map(x => x._2._1._2)
+
+    rdd.map(x => List(x._2._2))
   }
 
   override def compute(validTime: Time): Option[RDD[List[T]]] = {
     val predicatesCopy = predicates
     val patternCopy = pattern;
     val currentWindow = new Interval(validTime - windowDuration + parent.slideDuration, validTime)
-    val rddsInWindow = parent.slice(currentWindow)
+    val previousWindow = currentWindow - slideDuration
 
+    val rddsInPreviousWindow = parent.slice(previousWindow)
+
+    val previousWindowRDD = if (rddsInPreviousWindow.flatMap(_.partitioner).distinct.length == 1) {
+      logDebug("Using partition aware union for windowing at " + validTime)
+      new PartitionerAwareUnionRDD(ssc.sc, rddsInPreviousWindow)
+    } else {
+      println("wds " + rddsInPreviousWindow.length)
+      logDebug("Using normal union for windowing at " + validTime)
+      new UnionRDD(ssc.sc, rddsInPreviousWindow)
+    }
+
+    val tracker = PMWindowedDStream.getInstance(this.ssc.sparkContext)
+
+    val oldRDDs =
+      parent.slice(previousWindow.beginTime, currentWindow.beginTime - parent.slideDuration)
+
+
+    val oldRDD = if (oldRDDs.flatMap(_.partitioner).distinct.length == 1) {
+      logDebug("Using partition aware union for windowing at " + validTime)
+      new PartitionerAwareUnionRDD(ssc.sc, oldRDDs)
+    } else {
+      println("wds " + oldRDDs.length)
+      logDebug("Using normal union for windowing at " + validTime)
+      new UnionRDD(ssc.sc, oldRDDs)
+    }
+
+    val increment = oldRDD.count()
+
+
+    val rddsInWindow = parent.slice(currentWindow)
     val windowRDD = if (rddsInWindow.flatMap(_.partitioner).distinct.length == 1) {
       logDebug("Using partition aware union for windowing at " + validTime)
       new PartitionerAwareUnionRDD(ssc.sc, rddsInWindow)
@@ -112,44 +174,47 @@ class PMWindowedDStream[T: ClassTag](
       logDebug("Using normal union for windowing at " + validTime)
       new UnionRDD(ssc.sc, rddsInWindow)
     }
+
     println(windowRDD.count())
     //windowRDD.foreach(println)
     //fix empty collection problem
-    val min = windowRDD.count() match {
-      case x if (x > 0) => windowRDD.first();
-    }
-    val zippedRdd= windowRDD.zipWithIndex()
+    if (!windowRDD.isEmpty()) {
+      val first = windowRDD.first();
+      val last = windowRDD.take(windowRDD.count().toInt).last
 
-    val keyRdd =zippedRdd.map(i => {
-      (i._2, i._1)
-    })
+      val tracker = 0L;
 
-    //println(reversedWindowedRdd.count())
-    val previousKeyRdd = zippedRdd.map(i => {
-      (i._2 + 1, i._1)
-    })
+      val zippedRDD = windowRDD.zipWithIndex().map(x => (x._2, x._1)).sortByKey()
+      val unMatchedRDD = zippedRDD.filter(x => x._1 > tracker)
 
-    val sortedpreviousMappedRdd = keyRdd.leftOuterJoin(previousKeyRdd).sortByKey()
-   // println(sortedpreviousMappedRdd.count())
+      //println(reversedWindowedRdd.count())
+      val prevKeyRdd = unMatchedRDD.map(i => {
+        (i._1 + 1, i._2)
+      })
 
-   // sortedpreviousMappedRdd.foreach(println)
+      val sortedprevMappedRdd = unMatchedRDD.leftOuterJoin(prevKeyRdd).sortByKey()
+      // println(sortedpreviousMappedRdd.count())
+      // sortedpreviousMappedRdd.foreach(println)
 
-    val matchedRdd = sortedpreviousMappedRdd.map(x => {
-      var isMatch = false
-      var matchName = "NAN"
-      for (predicate <- predicatesCopy if !isMatch) {
-        isMatch = predicate._2(x._2._1, EventWindow(min, x._2._2.getOrElse(min)))
-        if (isMatch) {
-          matchName = predicate._1
+      val matchedRdd = sortedprevMappedRdd.map(x => {
+        var isMatch = false
+        var matchName = "NAN"
+        for (predicate <- predicatesCopy if !isMatch) {
+          isMatch = predicate._2(x._2._1, EventWindow(first, x._2._2.getOrElse(first)))
+          if (isMatch) {
+            matchName = predicate._1
+          }
         }
-      }
 
-      (x._1, (matchName, x._2._1))
-    })
+        (x._1, (matchName, x._2._1))
+      })
 
-    //matchedRdd.foreach(println)
-    println(matchedRdd.count())
-    Some(applyRegex(matchedRdd))
+      //matchedRdd.foreach(println)
+    //  println(matchedRdd.count())
+      Some(applyRegex(matchedRdd))
+    }
+    else
+      None
 
   }
 
