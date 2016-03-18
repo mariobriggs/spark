@@ -29,7 +29,7 @@ import scala.reflect.ClassTag
  */
 
 object PMWindowedDStream {
-  @volatile private var tracker: Accumulator[Long] = null
+   private var tracker: Accumulator[Long] = null
 
   def getInstance(sc: SparkContext): Accumulator[Long] = {
     if (tracker == null) {
@@ -70,7 +70,7 @@ class PMWindowedDStream[T: ClassTag](
 
   override def slideDuration: Duration = _slideDuration
 
-  override val mustCheckpoint = true
+  //override val mustCheckpoint = true
 
   override def parentRememberDuration: Duration = rememberDuration + windowDuration
 
@@ -83,51 +83,45 @@ class PMWindowedDStream[T: ClassTag](
       .map(x => {
         val it = x.iterator
         val builder = new scala.collection.mutable.StringBuilder()
-        val map = scala.collection.mutable.HashMap[Long, Long] ()
+        val map = scala.collection.mutable.HashMap[Long, Tuple2[Long,T]] ()
         var curLen = 1L
         while (it.hasNext) {
           val i = it.next()
           builder.append(" " + i._2._1)
-          map.put(curLen, i._1)
+          map.put(curLen, (i._1, i._2._2))
           curLen += i._2._1.length + 1
         }
         (builder.toString(), map)
       })
-    stream.foreach(println)
-    val selectedIds = stream.flatMap(y => {
+    val tracker = PMWindowedDStream.getInstance(this.ssc.sparkContext)
+
+    //stream.foreach(println)
+    stream.flatMap(y => {
       val it = patternCopy.findAllIn(y._1)
-      val o = ListBuffer[List[Long]] ()
+      val o = ListBuffer[List[T]] ()
       for (one <- it) {
         var len = 0
         var ctr = 0
-        val list = ListBuffer[Long] ()
-        val tracker = PMWindowedDStream.getInstance(this.ssc.sparkContext)
+        val list = ListBuffer[T] ()
         one.split(" ").map(sub => {
-          val id = y._2.get(it.start + len).getOrElse(0L)
-          list += id
-          if (tracker.value < id) {
-            tracker.setValue(id)
+          val id = y._2.get(it.start + len)
+          list += id.get._2
+          println("id="+id.get._1)
+          if (tracker.toString.toLong < id.get._1) {
+            tracker.setValue(id.get._1)
           }
           len += sub.length + 1
         })
         o += list.toList
+//        println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
         println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        println(tracker)
+//        o.toList.foreach(println)
         println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
-        println(tracker.value)
-        o.toList.foreach(println)
-        println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
-        println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
+//        println("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
       }
       o.toList
     })
-
-    //stuck here I changed map to store ( the pointer in string as key and id instead of T)
-    //what we need to do here is filter all elements based on selected ids and send them as return value
-    val x = selectedIds.flatMap(x => x)
-    val y = x.map(x => (x,x))
-    val z = rdd.join(y).map(x => x._2._1._2)
-
-    rdd.map(x => List(x._2._2))
   }
 
   override def compute(validTime: Time): Option[RDD[List[T]]] = {
@@ -142,7 +136,7 @@ class PMWindowedDStream[T: ClassTag](
       logDebug("Using partition aware union for windowing at " + validTime)
       new PartitionerAwareUnionRDD(ssc.sc, rddsInPreviousWindow)
     } else {
-      println("wds " + rddsInPreviousWindow.length)
+     // println("wds " + rddsInPreviousWindow.length)
       logDebug("Using normal union for windowing at " + validTime)
       new UnionRDD(ssc.sc, rddsInPreviousWindow)
     }
@@ -152,51 +146,54 @@ class PMWindowedDStream[T: ClassTag](
     val oldRDDs =
       parent.slice(previousWindow.beginTime, currentWindow.beginTime - parent.slideDuration)
 
-
     val oldRDD = if (oldRDDs.flatMap(_.partitioner).distinct.length == 1) {
       logDebug("Using partition aware union for windowing at " + validTime)
       new PartitionerAwareUnionRDD(ssc.sc, oldRDDs)
     } else {
-      println("wds " + oldRDDs.length)
+      //println("wds " + oldRDDs.length)
       logDebug("Using normal union for windowing at " + validTime)
       new UnionRDD(ssc.sc, oldRDDs)
     }
 
     val increment = oldRDD.count()
 
-
     val rddsInWindow = parent.slice(currentWindow)
     val windowRDD = if (rddsInWindow.flatMap(_.partitioner).distinct.length == 1) {
       logDebug("Using partition aware union for windowing at " + validTime)
       new PartitionerAwareUnionRDD(ssc.sc, rddsInWindow)
     } else {
-      println("wds " + rddsInWindow.length)
+      //println("wds " + rddsInWindow.length)
       logDebug("Using normal union for windowing at " + validTime)
       new UnionRDD(ssc.sc, rddsInWindow)
     }
 
-    println(windowRDD.count())
+    println("event received" + windowRDD.count())
     //windowRDD.foreach(println)
     //fix empty collection problem
     if (!windowRDD.isEmpty()) {
       val first = windowRDD.first();
       val last = windowRDD.take(windowRDD.count().toInt).last
-
-      val tracker = 0L;
+      var shift = 0L
+      if (tracker.toString.toLong > 0L) {
+        shift = tracker.toString.toLong - increment
+        tracker.setValue(0L)
+      }
 
       val zippedRDD = windowRDD.zipWithIndex().map(x => (x._2, x._1)).sortByKey()
-      val unMatchedRDD = zippedRDD.filter(x => x._1 > tracker)
+      val selectedRDD = zippedRDD.filter(x => x._1 > shift)
+
+      println("event selected for processing" + selectedRDD.count())
 
       //println(reversedWindowedRdd.count())
-      val prevKeyRdd = unMatchedRDD.map(i => {
+      val prevKeyRdd = selectedRDD.map(i => {
         (i._1 + 1, i._2)
       })
 
-      val sortedprevMappedRdd = unMatchedRDD.leftOuterJoin(prevKeyRdd).sortByKey()
+      val sortedprevMappedRdd = selectedRDD.leftOuterJoin(prevKeyRdd).sortByKey()
       // println(sortedpreviousMappedRdd.count())
       // sortedpreviousMappedRdd.foreach(println)
 
-      val matchedRdd = sortedprevMappedRdd.map(x => {
+      val taggedRDD = sortedprevMappedRdd.map(x => {
         var isMatch = false
         var matchName = "NAN"
         for (predicate <- predicatesCopy if !isMatch) {
@@ -210,13 +207,49 @@ class PMWindowedDStream[T: ClassTag](
       })
 
       //matchedRdd.foreach(println)
-    //  println(matchedRdd.count())
-      Some(applyRegex(matchedRdd))
+      //println(matchedRdd.count())
+      Some(applyRegex(taggedRDD))
     }
     else
       None
-
   }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   //sortedpreviousMappedRdd.foreach(println)
   //    val builder = new scala.collection.mutable.StringBuilder()
@@ -270,5 +303,3 @@ class PMWindowedDStream[T: ClassTag](
 
   //  }
 
-
-}

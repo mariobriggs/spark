@@ -475,7 +475,6 @@ object DirectKafkaWordCount {
 
   def main(args: Array[String]) {
 
-
     val brokers = "localhost:9092"
     val topics = "test"
     //val Array(brokers, topics) = args
@@ -516,7 +515,6 @@ object DirectKafkaWordCount {
 
     val preds: Map[String, (Tick, EventWindow) => Boolean] =
       Map("rise" -> rise, "drop" -> drop, "deep" -> deep)
-
 
     // Get the lines, split them into words, count the words and print
     val ticks = messages.map(_._2)

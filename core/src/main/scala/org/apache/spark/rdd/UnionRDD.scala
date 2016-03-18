@@ -69,7 +69,7 @@ class UnionRDD[T: ClassTag](
       array(pos) = new UnionPartition(pos, rdd, rddIndex, split.index)
       pos += 1
     }
-    println(" uds getP " + rdds.map(_.partitions.length).sum)
+    //println(" uds getP " + rdds.map(_.partitions.length).sum)
     array
   }
 
