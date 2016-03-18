@@ -83,6 +83,7 @@ fi
 # The launcher library will print arguments separated by a NULL character, to allow arguments with
 # characters that would be otherwise interpreted by the shell. Read that in a while loop, populating
 # an array that will be used to exec the final command.
-"$RUNNER" -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 -cp "$LAUNCH_CLASSPATH" org.apache.spark.scheduler.sparrow.SparrowExecutorBackend --driver-url spark://SparrowSchedulerBackend@9.184.90.83:7077 "$@"
+# "$RUNNER" -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 -cp "$LAUNCH_CLASSPATH" org.apache.spark.scheduler.sparrow.SparrowExecutorBackend --driver-url spark://SparrowSchedulerBackend@9.184.90.83:7077 "$@"
+"$RUNNER" -cp "$LAUNCH_CLASSPATH" org.apache.spark.scheduler.sparrow.SparrowExecutorBackend --cores 2 --driver-url spark://SparrowSchedulerBackend@9.184.90.83:7077 "$@"
 #echo -e "${CMD[@]}\n"
 # exec "${CMD[@]}"

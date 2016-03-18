@@ -50,11 +50,12 @@ import scala.util.{Failure, Success}
   */
 class SparrowExecutorBackend(driverUrl: String,
     executorId: String,
+    hostname: String,
     cores: Int,
     env: SparkEnv)
   extends ExecutorBackend with Logging with BackendService.Iface with ThreadSafeRpcEndpoint {
   private val executor: Executor = new Executor(
-    env.executorId, Utils.localHostName, env)
+    env.executorId, hostname, env)
   private val conf = env.conf
   override def onStart() {
     logInfo("Connecting to driver: " + driverUrl)
@@ -186,7 +187,7 @@ object SparrowExecutorBackend extends Logging {
 
     lazy val backend =
     new SparrowExecutorBackend(
-        driverUrl, executorId, cores, env)
+        driverUrl, hostname, executorId, cores, env)
     env.rpcEnv.setupEndpoint("Executor", backend)
 
     val processor = new BackendService.Processor[BackendService.Iface](backend)
@@ -246,8 +247,8 @@ object SparrowExecutorBackend extends Logging {
       cores = 1
     }
     if (executorId == null) {
-      executorId =
-        s"SparrowExecutor_${hostname}_${UUID.randomUUID().toString.substring(4, 8)}"
+      executorId = Utils.localHostName()
+        // s"SparrowExecutor_${hostname}_${UUID.randomUUID().toString.substring(4, 8)}"
     }
     if (appId == null) {
       appId = "spark"
