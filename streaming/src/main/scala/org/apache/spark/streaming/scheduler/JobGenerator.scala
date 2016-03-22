@@ -262,7 +262,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
         val streamEnd = System.currentTimeMillis()
         jobScheduler.submitJobSet(JobSet(time,
           AddlTime(act, eventProcTime, allocBlockEnd, TimingMap.map.get(time).get,
-          TimingMap.window.get(time).get,
+          TimingMap.window.get(time).getOrElse(Period(0,0)),
             genJobEnd, streamEnd),
           jobs, streamIdToInputInfos))
 
