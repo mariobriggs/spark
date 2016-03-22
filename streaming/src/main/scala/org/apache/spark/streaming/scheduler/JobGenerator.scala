@@ -180,11 +180,11 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
     logDebug("Got event " + event)
     event match {
       case GenerateJobs(time, actual) => generateJobs(time, actual)
-      /*case ClearMetadata(time) => clearMetadata(time)
+      case ClearMetadata(time) => clearMetadata(time)
       case DoCheckpoint(time, clearCheckpointDataLater) =>
         doCheckpoint(time, clearCheckpointDataLater)
-      case ClearCheckpointData(time) => clearCheckpointData(time)*/
-      case _ => logDebug("skipping other events")
+      case ClearCheckpointData(time) => clearCheckpointData(time)
+      //case _ => logDebug("skipping other events")
     }
   }
 
