@@ -232,7 +232,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
       // those blocks to the next batch, which is the batch they were supposed to go.
       jobScheduler.receiverTracker.allocateBlocksToBatch(time) // allocate received blocks to batch
       jobScheduler.submitJobSet(JobSet(time,
-        AddlTime(Time(0), 0L, 0L, KafkaTData(0, 0), 0L, 0L),
+        AddlTime(Time(0), 0L, 0L, KafkaTData(0, 0), Period(0, 0), 0L, 0L),
         graph.generateJobs(time)))
     }
 
@@ -262,6 +262,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
         val streamEnd = System.currentTimeMillis()
         jobScheduler.submitJobSet(JobSet(time,
           AddlTime(act, eventProcTime, allocBlockEnd, TimingMap.map.get(time).get,
+          TimingMap.window.get(time).get,
             genJobEnd, streamEnd),
           jobs, streamIdToInputInfos))
 
@@ -318,9 +319,13 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
 
 case class KafkaTData(start: Long, end: Long)
 
+case class Period(start: Long, end: Long)
+
 object TimingMap {
 
   import scala.collection.mutable.Map
   val map: Map[Time, KafkaTData] =  Map()
+
+  val window: Map[Time, Period] =  Map()
 
 }
