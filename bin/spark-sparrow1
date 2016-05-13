@@ -84,7 +84,7 @@ fi
 # characters that would be otherwise interpreted by the shell. Read that in a while loop, populating
 # an array that will be used to exec the final command.
 # "$RUNNER" -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 -cp "$LAUNCH_CLASSPATH" org.apache.spark.scheduler.sparrow.SparrowExecutorBackend --driver-url spark://SparrowSchedulerBackend@9.184.90.83:7077 "$@"
-"$RUNNER" -cp "$LAUNCH_CLASSPATH" org.apache.spark.scheduler.sparrow.SparrowExecutorBackend --cores 2 --driver-url spark://SparrowSchedulerBackend@9.109.15.131:7077 --executor-id exec1 --hostname 9.109.15.131 --app-id spark --listen-port 21101 --nmHost localhost --nmPort 19503 "$@"
+"$RUNNER" -cp "$LAUNCH_CLASSPATH" org.apache.spark.scheduler.sparrow.SparrowExecutorBackend --cores 2 --driver-url spark://SparrowSchedulerBackend@9.109.15.131:7077 --executor-id exec2 --hostname 9.109.15.131  --app-id spark --listen-port 21102 --nmHost localhost --nmPort 19501 "$@"
 
 #echo -e "${CMD[@]}\n"
 # exec "${CMD[@]}"

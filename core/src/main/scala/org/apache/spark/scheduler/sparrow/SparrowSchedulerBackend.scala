@@ -129,10 +129,10 @@ class SparrowSchedulerBackend(scheduler: SparrowScheduler)
             context.senderAddress
           }
           logInfo(s"Registered executor $executorRef with ID $executorId")
-          addressToExecutorId(executorRef.address) = executorId
+          addressToExecutorId(executorAddress) = executorId
           totalCoreCount.addAndGet(cores)
           totalRegisteredExecutors.addAndGet(1)
-          val data = new ExecutorData(executorRef, executorRef.address, executorAddress.host,
+          val data = new ExecutorData(executorRef, executorRef.address, executorId, //executorAddress.host,
             cores, cores, logUrls)
           // This must be synchronized because variables mutated
           // in this block are read when requesting executors
@@ -140,7 +140,7 @@ class SparrowSchedulerBackend(scheduler: SparrowScheduler)
             executorDataMap.put(executorId, data)
           }
           // Note: some tests expect the reply to come after we put the executor in the map
-          context.reply(RegisteredExecutor(executorAddress.host))
+          context.reply(RegisteredExecutor(executorId)) //executorAddress.host))
           listenerBus.post(
             SparkListenerExecutorAdded(System.currentTimeMillis(), executorId, data))
         }
@@ -217,6 +217,8 @@ class SparrowSchedulerBackend(scheduler: SparrowScheduler)
     }
 
     driverEndpoint = createDriverEndpointRef(properties)
+    println("Waiting to Start the Backend - Press enter after done")
+    scala.io.StdIn.readLine()
   }
 
   protected def createDriverEndpointRef(

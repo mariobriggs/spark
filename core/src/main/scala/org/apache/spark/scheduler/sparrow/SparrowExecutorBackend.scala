@@ -52,7 +52,9 @@ class SparrowExecutorBackend(driverUrl: String,
     executorId: String,
     hostname: String,
     cores: Int,
-    env: SparkEnv)
+    env: SparkEnv,
+    nmHost: String,
+    nmPort: Int)
   extends ExecutorBackend with Logging with BackendService.Iface with ThreadSafeRpcEndpoint {
   private val executor: Executor = new Executor(
     env.executorId, hostname, env)
@@ -77,8 +79,7 @@ class SparrowExecutorBackend(driverUrl: String,
   // to be changed so that we don't share the serializer instance across threads
   private[this] val ser: SerializerInstance = env.closureSerializer.newInstance()
 
-  private val nodeMonitorAddress =
-    new InetSocketAddress(conf.get("sparrow.nm.host", "localhost"), conf.getInt("sparrow.nm.port", 20501))
+  private val nodeMonitorAddress = new InetSocketAddress(nmHost, nmPort)
   private val appName = conf.get("sparrow.app.name", "spark")
 
   private val taskIdToFullTaskId = new HashMap[Long, TFullTaskId]()
@@ -143,6 +144,8 @@ class SparrowExecutorBackend(driverUrl: String,
 
 object SparrowExecutorBackend extends Logging {
   var listenPort = 33333
+  var nmHost:String = ""
+  var nmPort = 0
 
   private def run(
       driverUrl: String,
@@ -187,7 +190,7 @@ object SparrowExecutorBackend extends Logging {
 
     lazy val backend =
     new SparrowExecutorBackend(
-        driverUrl, hostname, executorId, cores, env)
+        driverUrl, hostname, executorId, cores, env, nmHost, nmPort)
     env.rpcEnv.setupEndpoint("Executor", backend)
 
     val processor = new BackendService.Processor[BackendService.Iface](backend)
@@ -230,6 +233,15 @@ object SparrowExecutorBackend extends Logging {
           argv = tail
         case ("--app-id") :: value :: tail =>
           appId = value
+          argv = tail
+        case ("--listen-port") :: value :: tail =>
+          listenPort = value.toInt
+          argv = tail
+        case ("--nmHost") :: value :: tail =>
+          nmHost = value
+          argv = tail
+        case ("--nmPort") :: value :: tail =>
+          nmPort = value.toInt
           argv = tail
         case Nil =>
         case tail =>

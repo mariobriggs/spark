@@ -106,7 +106,7 @@ class KafkaRDD[
   override def getPreferredLocations(thePart: Partition): Seq[String] = {
     val part = thePart.asInstanceOf[KafkaRDDPartition]
     // TODO is additional hostname resolution necessary here
-    Seq(part.host)
+    Seq()
   }
 
   private def errBeginAfterEnd(part: KafkaRDDPartition): String =
@@ -219,6 +219,7 @@ class KafkaRDD[
           null.asInstanceOf[R]
         } else {
           requestOffset = item.nextOffset
+          log.info("fetched message")
           messageHandler(new MessageAndMetadata(
             part.topic, part.partition, item.message, item.offset, keyDecoder, valueDecoder))
         }
