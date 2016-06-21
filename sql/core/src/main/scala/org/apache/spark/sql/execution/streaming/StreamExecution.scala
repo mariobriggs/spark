@@ -270,6 +270,8 @@ class StreamExecution(
     // method. See SPARK-14131.
     //
     // Check to see what new data is available.
+    val startConstruct = System.currentTimeMillis()
+
     val hasNewData = {
       awaitBatchLock.lock()
       try {
@@ -300,6 +302,7 @@ class StreamExecution(
           s"Concurrent update to the log.  Multiple streaming jobs detected for $currentBatchId")
       }
       logInfo(s"Committed offsets for batch $currentBatchId.")
+      TimingMap.map.put(currentBatchId, ConstructTime(startConstruct, System.currentTimeMillis()))
     } else {
       awaitBatchLock.lock()
       try {
@@ -380,7 +383,8 @@ class StreamExecution(
     logInfo(s"Completed up to $availableOffsets in ${batchTime}ms")
     // Update committed offsets.
     committedOffsets ++= availableOffsets
-    postEvent(new QueryProgress(this.toInfo))
+    postEvent(new QueryProgress(this.toInfo(startTime, System.nanoTime())))
+
   }
 
   private def postEvent(event: StreamingQueryListener.Event) {
@@ -491,12 +495,25 @@ class StreamExecution(
      """.stripMargin
   }
 
+  private def toInfo(start: Long, end: Long): StreamingQueryInfo = {
+    new StreamingQueryInfo(
+      this.name,
+      this.id,
+      this.sourceStatuses,
+      this.sinkStatus,
+      this.currentBatchId,
+      TimingMap.map.get(currentBatchId).get,
+      RunTime(start, end)
+    )
+  }
+
   private def toInfo: StreamingQueryInfo = {
     new StreamingQueryInfo(
       this.name,
       this.id,
       this.sourceStatuses,
-      this.sinkStatus)
+      this.sinkStatus
+    )
   }
 
   trait State
@@ -509,4 +526,10 @@ private[sql] object StreamExecution {
   private val _nextId = new AtomicLong(0)
 
   def nextId: Long = _nextId.getAndIncrement()
+}
+
+
+object TimingMap {
+  import scala.collection.mutable.Map
+  val map: Map[Long, ConstructTime] = Map()
 }

@@ -19,6 +19,9 @@ package org.apache.spark.sql.streaming
 
 import org.apache.spark.annotation.Experimental
 
+case class ConstructTime(start: Long, end: Long)
+
+case class RunTime(start: Long, end: Long)
 /**
  * :: Experimental ::
  * A class used to report information about the progress of a [[StreamingQuery]].
@@ -34,4 +37,15 @@ class StreamingQueryInfo private[sql](
   val name: String,
   val id: Long,
   val sourceStatuses: Seq[SourceStatus],
-  val sinkStatus: SinkStatus)
+  val sinkStatus: SinkStatus,
+  val batchId: Long,
+  val constrTime: ConstructTime,
+  val runTime: RunTime) {
+
+  def this(
+    name: String,
+    id: Long,
+    sourceStatuses: Seq[SourceStatus],
+    sinkStatus: SinkStatus) =
+    this (name, id, sourceStatuses, sinkStatus, -1, ConstructTime(0, 0), RunTime(0, 0) )
+}
