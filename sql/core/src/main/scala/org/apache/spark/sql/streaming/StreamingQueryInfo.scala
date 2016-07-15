@@ -40,12 +40,15 @@ class StreamingQueryInfo private[sql](
   val sinkStatus: SinkStatus,
   val batchId: Long,
   val constrTime: ConstructTime,
-  val runTime: RunTime) {
+  val runTime: RunTime,
+  val getDataTime: Long,  val replaceLogPlanTime: Long,
+       val rewirePlanTime: Long, val optimizerTime: Double,  val nextBatchTime: Long) {
 
   def this(
     name: String,
     id: Long,
     sourceStatuses: Seq[SourceStatus],
     sinkStatus: SinkStatus) =
-    this (name, id, sourceStatuses, sinkStatus, -1, ConstructTime(0, 0), RunTime(0, 0) )
+    this (name, id, sourceStatuses, sinkStatus, -1, ConstructTime(0, 0), RunTime(0, 0),
+      0L, 0L, 0L, 0.0, 0L )
 }

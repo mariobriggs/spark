@@ -270,7 +270,7 @@ class StreamExecution(
     // method. See SPARK-14131.
     //
     // Check to see what new data is available.
-    val startConstruct = System.currentTimeMillis()
+    val startConstruct = System.nanoTime()
 
     val hasNewData = {
       awaitBatchLock.lock()
@@ -302,7 +302,7 @@ class StreamExecution(
           s"Concurrent update to the log.  Multiple streaming jobs detected for $currentBatchId")
       }
       logInfo(s"Committed offsets for batch $currentBatchId.")
-      TimingMap.map.put(currentBatchId, ConstructTime(startConstruct, System.currentTimeMillis()))
+      TimingMap.map.put(currentBatchId, ConstructTime(startConstruct, System.nanoTime()))
     } else {
       awaitBatchLock.lock()
       try {
@@ -332,6 +332,7 @@ class StreamExecution(
       case _ => None
     }.toMap
 
+    val replaceLogPlanStart = System.nanoTime()
     // A list of attributes that will need to be updated.
     var replacements = new ArrayBuffer[(Attribute, Attribute)]
     // Replace sources in the logical plan with data that has arrived since the last batch.
@@ -349,6 +350,7 @@ class StreamExecution(
         }
     }
 
+    val rewirePlanStart = System.nanoTime()
     // Rewire the plan to use the new attributes that were returned by the source.
     val replacementMap = AttributeMap(replacements)
     val newPlan = withNewSources transformAllExpressions {
@@ -367,8 +369,10 @@ class StreamExecution(
     val optimizerTime = (System.nanoTime() - optimizerStart).toDouble / 1000000
     logDebug(s"Optimized batch in ${optimizerTime}ms")
 
+    val bStart = System.nanoTime()
     val nextBatch =
       new Dataset(sparkSession, lastExecution, RowEncoder(lastExecution.analyzed.schema))
+    println("addBatch " + System.currentTimeMillis())
     sink.addBatch(currentBatchId, nextBatch)
 
     awaitBatchLock.lock()
@@ -379,11 +383,18 @@ class StreamExecution(
       awaitBatchLock.unlock()
     }
 
+    val bEnd = System.nanoTime()
     val batchTime = (System.nanoTime() - startTime).toDouble / 1000000
     logInfo(s"Completed up to $availableOffsets in ${batchTime}ms")
     // Update committed offsets.
     committedOffsets ++= availableOffsets
-    postEvent(new QueryProgress(this.toInfo(startTime, System.nanoTime())))
+    postEvent(new QueryProgress(this.toInfo(startTime, System.nanoTime(),
+			(replaceLogPlanStart-startTime),
+			(rewirePlanStart-replaceLogPlanStart),
+			(optimizerStart-rewirePlanStart),
+			optimizerTime,
+			(bEnd-bStart)
+                       )))
 
   }
 
@@ -495,7 +506,8 @@ class StreamExecution(
      """.stripMargin
   }
 
-  private def toInfo(start: Long, end: Long): StreamingQueryInfo = {
+  private def toInfo(start: Long, end: Long, getDataTime: Long,  replaceLogPlanTime: Long,
+       rewirePlanTime: Long, optimizerTime: Double,  nextBatchTime: Long ): StreamingQueryInfo = {
     new StreamingQueryInfo(
       this.name,
       this.id,
@@ -503,7 +515,8 @@ class StreamExecution(
       this.sinkStatus,
       this.currentBatchId,
       TimingMap.map.get(currentBatchId).get,
-      RunTime(start, end)
+      RunTime(start, end),
+      getDataTime, replaceLogPlanTime, rewirePlanTime, optimizerTime, nextBatchTime
     )
   }
 
